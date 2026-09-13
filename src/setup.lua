@@ -8,13 +8,11 @@ local util = require("src.util")
 local settings = require("src.settings")
 local connect = require("src.connect")
 local survey = require("src.survey")
+local climate = require("src.climate")
 
 local setup = {}
 
-local biomes = {
-  { "Plains",  0.8,  0.4 }, { "Forest", 0.7, 0.8 }, { "Jungle", 0.95, 0.9 }, { "Swamp", 0.8, 0.9 },
-  { "Desert",  2.0,  0.0 }, { "Taiga",  0.05, 0.8 }, { "Ocean", 0.5, 0.5 }, { "Extreme Hills", 0.2, 0.3 },
-}
+local biomes = climate.biomes
 
 local function write(fmt, ...)
   term.write((select("#", ...) > 0 and string.format(fmt, ...) or tostring(fmt)) .. "\n")

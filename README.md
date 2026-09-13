@@ -277,6 +277,25 @@ the cell that needs the fewest upgrades to reach it, so a hot mutation lands in 
 in the tundra cell rather than wherever happened to be free. A job no cell can reach fails saying so instead of
 waiting forever.
 
+Adding a cell:
+
+1. Build it like the first one. Cable both of its Adapters to the controller's OC network and put both ME
+   Interfaces on the library's ME network. The controller stocks every interface through a single Database
+   upgrade, so the Adapters of later cells can go without one.
+2. On the controller: `cell add cell2 plains`. `cell add` alone lists the biome names; `cell add cell2 1.2 0.1`
+   takes the temperature and humidity as numbers.
+3. Install on the new robot and run `main`. The guide asks for the cell name: give the same one, `cell2`.
+4. When `cells` shows it, run `pair cell2` on the controller with that robot idle.
+
+A cell gets no jobs until its interfaces are known, and `cells` says what is missing. A robot whose name is not
+in the config borrows the settings of the one configured cell only while it is the only robot online, so a
+second robot never works out of the first cell's interfaces. Once there are two, give each robot its own entry
+with `cell add` and `pair`, or rename the robot with `main setup` on it. `cell` lists every cell with its climate and
+whether it is paired; `cell remove <name>` takes one out.
+
+Every ME Interface an Adapter exposes and every Database upgrade counts towards the computer's component limit
+(16 with a tier 3 CPU). A few cells in, the controller wants a server with component buses.
+
 ### When a queen will not work
 
 A queen that refuses to work is nearly always missing her flowers, the right temperature, the right air, or

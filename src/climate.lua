@@ -13,6 +13,24 @@ climate.humidities = { "Arid", "Normal", "Damp" }
 climate.step = 0.25
 climate.maxUpgrades = 16
 
+-- Biome temperature and humidity, for saying where a cell stands
+-- (`cell add cell2 plains` on the controller, or the setup guide)
+climate.biomes = {
+  { "Plains", 0.8, 0.4 }, { "Forest", 0.7, 0.8 }, { "Jungle", 0.95, 0.9 }, { "Swamp", 0.8, 0.9 },
+  { "Desert", 2.0, 0.0 }, { "Taiga", 0.05, 0.8 }, { "Ocean", 0.5, 0.5 }, { "Extreme Hills", 0.2, 0.3 },
+  { "Savanna", 1.2, 0.0 }, { "Mesa", 2.0, 0.0 }, { "Ice Plains", 0.0, 0.5 }, { "Mushroom Island", 0.9, 1.0 },
+}
+
+--- A biome by name, ignoring case and spaces. Returns name, temperature, humidity, or nil.
+function climate.findBiome(text)
+  local key = tostring(text or ""):lower():gsub("[%s_]", "")
+  if key == "" then return nil end
+  for _, b in ipairs(climate.biomes) do
+    if b[1]:lower():gsub("%s", "") == key then return b[1], b[2], b[3] end
+  end
+  return nil
+end
+
 local tempIndex, humIndex = {}, {}
 for i, n in ipairs(climate.temperatures) do tempIndex[n] = i end
 for i, n in ipairs(climate.humidities) do humIndex[n] = i end

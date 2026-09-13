@@ -5,7 +5,7 @@
 -- the catalog and carry the mod name when several mods share a name.
 --
 -- Lives on the computer. Needs on its OC network: an ME network component,
--- per cell two ME Interfaces each behind an Adapter with a Database upgrade,
+-- per cell two ME Interfaces each behind an Adapter, one Database upgrade,
 -- a modem, and optionally an internet card for Discord and the host link.
 local component = require("component")
 local event = require("event")
@@ -31,6 +31,16 @@ local controller = {}
 --- Strip characters the gui-lib template engine treats as markup.
 local function clean(s)
   return (tostring(s):gsub("[%$#&@?]", ""))
+end
+
+--- True for an interface address that was never filled in (the config.lua placeholder counts).
+local function unsetAddr(addr)
+  return addr == nil or addr == "" or tostring(addr):match("^a+%-") ~= nil
+end
+
+local function sharesInterface(a, b)
+  return a.mainInterface == b.mainInterface or a.beeInterface == b.beeInterface
+    or a.mainInterface == b.beeInterface or a.beeInterface == b.mainInterface
 end
 
 ---Create a controller
@@ -635,24 +645,64 @@ function controller:new(cfg, logger)
   -- cells
   ----------------------------------------------------------------------
   function obj:cellFor(name)
+    local cells = self.cfg.cells or {}
     local c = self.cells[name]
     if not c then
-      local cells = self.cfg.cells or {}
       local cellCfg = cells[name]
       if not cellCfg and util.count(cells) == 1 then
-        -- a robot named differently from the one configured cell: use that cell
+        -- a robot named differently from the one configured cell uses that
+        -- cell, but only while it is the only robot: with two online there is
+        -- no telling which of them stands at that cell
         local onlyName = util.sortedKeys(cells)[1]
-        cellCfg = cells[onlyName]
-        self:log("cell '%s' is not in the config; using the settings of '%s'", name, onlyName)
+        local taken
+        for _, other in pairs(self.cells) do
+          if other.addr then taken = other.name end
+        end
+        if taken then
+          self:warn("cell '%s' is not in the config and %s is online too: cell add %s <biome>, then pair %s",
+            name, taken, name, name)
+        else
+          cellCfg = cells[onlyName]
+          self:log("cell '%s' is not in the config; using the settings of '%s'", name, onlyName)
+        end
       end
       c = { name = name, status = "unknown", lastSeen = 0, cfg = cellCfg or {} }
       self.cells[name] = c
+    elseif cells[name] then
+      -- `cell add` and `pair` change a cell's settings while its robot is online
+      c.cfg = cells[name]
     end
     return c
   end
 
   function obj:cellByAddr(addr)
     for _, c in pairs(self.cells) do if c.addr == addr then return c end end
+  end
+
+  --- Why a cell should not be given jobs yet, or nil when it can take them.
+  --- Stocking the wrong interface strands bees where no robot can reach them.
+  function obj:cellProblem(c)
+    local cells = self.cfg.cells or {}
+    local cfg = c.cfg or {}
+    if unsetAddr(cfg.mainInterface) or unsetAddr(cfg.beeInterface) then
+      return "its ME interfaces are unknown, run: pair " .. c.name
+    end
+    for name, other in pairs(cells) do
+      if name ~= c.name and sharesInterface(cfg, other) then
+        local borrower = other == cfg and not cells[c.name]
+        local alone = true
+        for _, rival in pairs(self.cells) do
+          if rival ~= c and rival.addr then alone = false end
+        end
+        if borrower and not alone then
+          return string.format("not in the config and another robot is online: cell add %s <biome>, then pair %s", c.name, c.name)
+        elseif not borrower and not (cfg.paired and not other.paired) then
+          -- when only one of the two was paired, that one is right
+          return string.format("it is set to an ME interface of %s, run: pair %s", name, c.name)
+        end
+      end
+    end
+    return nil
   end
 
   local function ifaceProxy(addr)
@@ -790,7 +840,16 @@ function controller:new(cfg, logger)
     while true do
       local idle = {}
       for name, c in pairs(self.cells) do
-        if c.status == "idle" and c.addr and not c.job then idle[#idle + 1] = name end
+        if c.status == "idle" and c.addr and not c.job then
+          local problem = self:cellProblem(c)
+          if not problem then
+            idle[#idle + 1] = name
+            c.problemSaid = nil
+          elseif c.problemSaid ~= problem then
+            c.problemSaid = problem
+            self:warn("%s gets no jobs: %s", name, problem)
+          end
+        end
       end
       if #idle == 0 then return end
       table.sort(idle)
@@ -1097,8 +1156,9 @@ function controller:new(cfg, logger)
         out[#out + 1] = string.format("%-8s %s -> %s  gen %s [%s]%s  %s", name, job.id, self:label(job.target),
           tostring(c.gen or 0), tostring(c.phase or "-"), progress, util.fmtSeconds(util.now() - (job.started or util.now())))
       else
-        out[#out + 1] = string.format("%-8s %s  (seen %s ago)  foundation %s", name, c.status,
-          util.fmtSeconds(util.now() - (c.lastSeen or 0)), tostring(c.foundation or "-"))
+        local problem = c.addr and self:cellProblem(c)
+        out[#out + 1] = string.format("%-8s %s  (seen %s ago)  foundation %s%s", name, c.status,
+          util.fmtSeconds(util.now() - (c.lastSeen or 0)), tostring(c.foundation or "-"), problem and ("  ! " .. problem) or "")
       end
     end
     if #out == 0 then out[1] = "no cells have reported yet" end
@@ -1238,6 +1298,7 @@ function controller:new(cfg, logger)
         "purify <number> [keep 8]             breed a species with itself until its drones stack",
         "hives                  species that cannot be bred and must come from wild hives, with your stock",
         "status | queue | cells | library [text] | cancel <job|request> | retry <job|request> | scan | survey",
+        "cell [add <name> <biome>|remove <name>]   list the cells, or add one and say where it stands",
         "pair [cell]            find out which ME interface is which by marking them for the robot",
         "diag [cell]            report what the robot can reach above, below and in front",
         "settings [show|test|host <url>|interval <s>|discord webhook <url>|discord bot <token> <channel>|discord on|off]",
@@ -1391,6 +1452,8 @@ function controller:new(cfg, logger)
       return self:startPairing(w[2], false)
     elseif verb == "diag" then
       return self:startPairing(w[2], true)
+    elseif verb == "cell" then
+      return self:cellCommand(w)
     elseif verb == "settings" then
       return self:settingsCommand(w)
     elseif verb == "find" then
@@ -1468,9 +1531,10 @@ function controller:new(cfg, logger)
       local out = {}
       for _, name in ipairs(util.sortedKeys(self.cells)) do
         local c = self.cells[name]
-        out[#out + 1] = string.format("%s %s housing=%s foundation=%s addr=%s%s", name, c.status, tostring(c.housing),
+        local problem = c.addr and self:cellProblem(c)
+        out[#out + 1] = string.format("%s %s housing=%s foundation=%s addr=%s%s%s", name, c.status, tostring(c.housing),
           tostring(c.foundation), c.addr and c.addr:sub(1, 8) or "-",
-          c.keep and string.format(" archived=%d/%d", c.archived or 0, c.keep) or "")
+          c.keep and string.format(" archived=%d/%d", c.archived or 0, c.keep) or "", problem and ("  ! " .. problem) or "")
       end
       return #out > 0 and table.concat(out, "\n") or "no cells have reported yet"
     elseif verb == "library" then
@@ -1628,6 +1692,80 @@ function controller:new(cfg, logger)
   end
 
   ----------------------------------------------------------------------
+  -- cells in the config
+  ----------------------------------------------------------------------
+  function obj:cellCommand(w)
+    local sub = (w[2] or "list"):lower()
+    local cells = self.cfg.cells or {}
+    local biomeNames = table.concat(util.map(climate.biomes, function(b) return b[1]:lower() end), ", ")
+    if sub == "list" then
+      local names = util.sortedKeys(cells)
+      for name in pairs(self.cells) do if not cells[name] then names[#names + 1] = name end end
+      table.sort(names)
+      if #names == 0 then return "no cells yet; add one with: cell add cell1 plains" end
+      local out = {}
+      for _, name in ipairs(names) do
+        local cfg = cells[name] or {}
+        local c = self.cells[name]
+        local online = c and c.addr
+        if online then self:cellFor(name) end
+        local base = cfg.base
+        local problem = online and self:cellProblem(c)
+        local borrowedFrom
+        if online and not cells[name] then
+          for other, otherCfg in pairs(cells) do if otherCfg == c.cfg then borrowedFrom = other end end
+        end
+        out[#out + 1] = string.format("%-8s %-7s %s  interfaces %s%s%s", name, online and "online" or "offline",
+          (base and base.temp and base.hum) and string.format("temp %.2f %s, humidity %.2f %s", base.temp,
+            climate.classifyTemp(base.temp), base.hum, climate.classifyHum(base.hum)) or "biome not set",
+          cfg.paired and "paired" or ((unsetAddr(cfg.mainInterface) or unsetAddr(cfg.beeInterface)) and "unknown" or "set by hand"),
+          borrowedFrom and ("  using the settings of " .. borrowedFrom) or "", problem and ("  ! " .. problem) or "")
+      end
+      return table.concat(out, "\n")
+    elseif sub == "add" then
+      local name = w[3]
+      if not name or not name:match("^[%w_%-]+$") then
+        return "usage: cell add <name> <biome | temperature humidity>\nbiomes: " .. biomeNames
+      end
+      local biome, temp, hum
+      if tonumber(w[4]) and tonumber(w[5]) then
+        biome, temp, hum = "custom", tonumber(w[4]), tonumber(w[5])
+      else
+        biome, temp, hum = climate.findBiome(table.concat(w, " ", 4))
+        if not biome then
+          return string.format("unknown biome '%s'; use one of: %s, or give temperature and humidity numbers",
+            table.concat(w, " ", 4), biomeNames)
+        end
+      end
+      local existed = cells[name] ~= nil
+      self:setSetting("cells." .. name .. ".base", { temp = temp, hum = hum })
+      if not self.cfg.cells[name].housing then self:setSetting("cells." .. name .. ".housing", "gt_iapiary") end
+      local c = self.cells[name]
+      if c then self:cellFor(name) end
+      local out = { string.format("%s %s: %s, temperature %.2f %s, humidity %.2f %s", existed and "updated" or "added",
+        name, biome, temp, climate.classifyTemp(temp), hum, climate.classifyHum(hum)) }
+      if not (c and c.addr) then
+        out[#out + 1] = string.format("next: run main on its robot and name it %s, then here: pair %s", name, name)
+      else
+        local problem = self:cellProblem(c)
+        if problem then out[#out + 1] = "next: " .. problem end
+      end
+      return table.concat(out, "\n")
+    elseif sub == "remove" then
+      local name = w[3]
+      if not name or not cells[name] then
+        return "usage: cell remove <name>; configured: " .. table.concat(util.sortedKeys(cells), ", ")
+      end
+      local c = self.cells[name]
+      if c and c.job then return name .. " is running " .. tostring(c.job) .. "; cancel it first" end
+      self:setSetting("cells." .. name, nil)
+      if c then c.cfg = {} end
+      return "removed " .. name .. ((c and c.addr) and "; its robot is still online but gets no jobs" or "")
+    end
+    return "usage: cell [list] | cell add <name> <biome | temperature humidity> | cell remove <name>"
+  end
+
+  ----------------------------------------------------------------------
   -- interface pairing
   --
   -- The controller knows the ME interface addresses but cannot see inside
@@ -1650,13 +1788,42 @@ function controller:new(cfg, logger)
       label = self.cfg.honeyLabel or "Honey Drop" })
   end
 
-  function obj:startPairing(cellName, diagOnly)
-    local c = cellName and self.cells[cellName] or nil
-    if not c then
-      local names = util.sortedKeys(self.cells)
-      if #names == 1 then c = self.cells[names[1]] end
+  --- Interfaces no other cell is set to go first, so pairing a new cell
+  --- rarely puts markers into the interfaces of a cell that is working.
+  function obj:pairCandidates(cellName, addrs)
+    local claimed = {}
+    for name, cfg in pairs(self.cfg.cells or {}) do
+      if name ~= cellName then
+        if cfg.mainInterface then claimed[cfg.mainInterface] = true end
+        if cfg.beeInterface then claimed[cfg.beeInterface] = true end
+      end
     end
-    if not c or not c.addr then return "no cell is online; start the robot first" end
+    table.sort(addrs, function(a, b)
+      if (claimed[a] == true) ~= (claimed[b] == true) then return not claimed[a] end
+      return a < b
+    end)
+    return addrs
+  end
+
+  function obj:startPairing(cellName, diagOnly)
+    local names = {}
+    for name, cell in pairs(self.cells) do if cell.addr then names[#names + 1] = name end end
+    table.sort(names)
+    local c
+    if cellName then
+      c = self.cells[cellName]
+      if not (c and c.addr) then
+        if #names == 0 then return "no cell is online; start the robot first" end
+        return string.format("%s has not reported; online: %s (a robot is named when main first runs on it)",
+          cellName, table.concat(names, ", "))
+      end
+    elseif #names == 1 then
+      c = self.cells[names[1]]
+    elseif #names > 1 then
+      return string.format("several cells are online, name one: %s %s", diagOnly and "diag" or "pair", table.concat(names, " | "))
+    else
+      return "no cell is online; start the robot first"
+    end
     if c.job then return "cell " .. c.name .. " is running job " .. tostring(c.job) .. "; cancel it first" end
     if self.pairing then return "already running, wait for it to finish" end
     local cands = {}
@@ -1664,6 +1831,7 @@ function controller:new(cfg, logger)
       if not self.me or not self.me.db then return "no ME network or database upgrade on the controller" end
       for addr in component.list("me_interface") do cands[#cands + 1] = addr end
       if #cands == 0 then return "no me_interface component: is an adapter touching each interface?" end
+      self:pairCandidates(c.name, cands)
     end
     self.pairing = { name = c.name, addr = c.addr, cands = cands, i = 1, phase = diagOnly and "diag_down" or "stock",
                      seen = {}, sizes = {}, diagOnly = diagOnly, started = util.now() }
@@ -1797,7 +1965,13 @@ function controller:new(cfg, logger)
     if not P.seen.up then
       out[#out + 1] = "the interface above the robot was not identified; honey and blocks cannot arrive"
     end
-    if P.seen.down and P.seen.up then out[#out + 1] = "pairing done, start the job again with: retry r1" end
+    if P.seen.down and P.seen.up then
+      self:setSetting("cells." .. P.name .. ".paired", true)
+      self:cellFor(P.name)
+      local base = self.cfg.cells[P.name].base
+      out[#out + 1] = string.format("pairing done, %s can take jobs (retry any job that failed meanwhile)%s", P.name,
+        base and "" or string.format("; say where it stands with: cell add %s <biome>", P.name))
+    end
     return out
   end
 

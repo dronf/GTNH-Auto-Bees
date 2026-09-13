@@ -529,6 +529,75 @@ T.run("integration: jobs go to the cell whose climate suits them", function()
   ctl.cells.cell2 = nil
 end)
 
+T.run("integration: a second cell is added, kept off the first cell's interfaces, and paired", function()
+  env.side = "controller"
+  local settingsLib = require("src.settings")
+  settingsLib.path = dataDir .. "/settings.dat"
+  ctl.settingsData = settingsLib.load()
+  local cells = ctl.cfg.cells
+
+  -- cell2's robot reports while cell1's robot is online and cell2 is not configured
+  local c2 = ctl:cellFor("cell2")
+  c2.addr, c2.status, c2.housing, c2.lastSeen = "modem-cell2", "idle", "gt_iapiary", env.clock
+  T.ok(c2.cfg ~= cells.cell1, "it does not borrow cell1's settings while cell1's robot is online")
+  T.ok((ctl:cellProblem(c2) or ""):find("pair cell2", 1, true), "it is told to pair: " .. tostring(ctl:cellProblem(c2)))
+  T.eq(ctl:cellProblem(ctl.cells.cell1), nil, "cell1 is unaffected")
+  ctl:dispatch()
+  T.ok(c2.problemSaid ~= nil, "dispatch passes it over and says why")
+  T.ok(ctl:command("cells", "test"):find("pair cell2", 1, true), "cells shows what is missing")
+  T.ok(ctl:command("pair", "test"):find("several cells", 1, true), "pair asks which cell once there are two")
+  T.ok(ctl:command("pair cell9", "test"):find("has not reported", 1, true), "and refuses a cell that never reported")
+
+  -- say where it stands
+  local res = ctl:command("cell add cell2 plains", "test")
+  T.ok(res:find("added cell2", 1, true), "cell add: " .. res)
+  T.eq(cells.cell2.base.temp, 0.8, "the biome sets the temperature")
+  T.eq(cells.cell2.base.hum, 0.4, "and the humidity")
+  T.ok(c2.cfg == cells.cell2, "the online robot picks up its new settings")
+  T.ok(res:find("pair cell2", 1, true), "and the next step is pairing")
+  T.eq(util.loadTable(settingsLib.path, {}).controller.cells.cell2.base.temp, 0.8, "saved to settings.dat")
+  T.ok(ctl:command("cell add cell2 frozen wastes", "test"):find("unknown biome", 1, true), "an unknown biome is refused")
+  T.ok(ctl:command("cell add cell3 Extreme Hills", "test"):find("added cell3", 1, true), "biome names may have spaces")
+  T.ok(ctl:command("cell add cell3 1.5 0.2", "test"):find("updated cell3", 1, true), "raw numbers work too")
+  T.eq(cells.cell3.base.temp, 1.5, "and replace the biome")
+  local listed = ctl:command("cell", "test")
+  T.ok(listed:match("cell3%s+offline%s+temp 1%.50 Hot"), "cell lists configured cells: " .. listed)
+
+  -- interfaces typed in by hand that belong to the paired cell1 are refused
+  ctl:setSetting("cells.cell2.mainInterface", "iface-main")
+  ctl:setSetting("cells.cell2.beeInterface", "iface-bees")
+  T.ok((ctl:cellProblem(c2) or ""):find("cell1", 1, true), "cell2 on cell1's interfaces gets no jobs: " .. tostring(ctl:cellProblem(c2)))
+  T.eq(ctl:cellProblem(ctl.cells.cell1), nil, "while the paired cell1 keeps working")
+  T.eq(ctl:pairCandidates("cell3", { "iface-main", "new-2", "iface-bees", "new-1" }),
+    { "new-1", "new-2", "iface-bees", "iface-main" }, "pairing tries the interfaces no other cell uses first")
+
+  T.ok(ctl:command("cell remove cell3", "test"):find("removed cell3", 1, true), "cell remove")
+  ctl:command("cell remove cell2", "test")
+  T.eq(cells.cell2, nil, "removed from the config")
+  T.ok(ctl:cellProblem(c2) ~= nil, "and its robot gets no jobs")
+  ctl.cells.cell2 = nil
+
+  -- a lone robot with another name still borrows the only configured cell
+  local addr1 = ctl.cells.cell1.addr
+  ctl.cells.cell1.addr = nil
+  local lone = ctl:cellFor("bees")
+  lone.addr = "modem-bees"
+  T.ok(lone.cfg == cells.cell1, "a robot named differently uses the one configured cell")
+  T.eq(ctl:cellProblem(lone), nil, "and can take jobs")
+  local second = ctl:cellFor("cell2")
+  second.addr = "modem-cell2"
+  T.ok(second.cfg ~= cells.cell1, "a second robot does not borrow the cell the first one works")
+  T.ok((ctl:cellProblem(lone) or ""):find("cell add bees", 1, true),
+    "and the borrower stops once another robot is online: " .. tostring(ctl:cellProblem(lone)))
+  T.ok(ctl:command("cell", "test"):find("using the settings of cell1", 1, true), "cell shows whose settings a robot borrows")
+  second.cfg = cells.cell1
+  T.ok(ctl:cellProblem(second) ~= nil, "and two robots on one borrowed cell get no jobs")
+  ctl.cells.cell2 = nil
+  ctl.cells.bees = nil
+  ctl.cells.cell1.addr = addr1
+  env.side = "robot"
+end)
+
 T.run("integration: more makes another batch of a bee already in the library", function()
   env.side = "controller"
   T.ok(ctl:command("more Common keep 24", "test"):find("24 more drones", 1, true), "a plain batch")
