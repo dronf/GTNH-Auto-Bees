@@ -2,59 +2,22 @@
 
 ![status](https://img.shields.io/badge/status-alpha%20%C2%B7%20not%20yet%20tested%20in%20game-orange)
 ![lua](https://img.shields.io/badge/Lua-5.3%20%28OpenComputers%29-blue)
-![pack](https://img.shields.io/badge/GTNH-2.7%2B-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
-Hands-off Forestry bee breeding for GregTech: New Horizons, written in Lua for OpenComputers.
-Ask for a species by number, the controller plans the whole mutation chain, robots breed every step in
-GT Industrial Apiaries, foundation blocks and climate upgrades get swapped automatically, and pure stock
-lands in your ME network. Watch it on a screen or from Discord.
+GTNH-Auto-Bees automates Forestry bee breeding in GregTech: New Horizons using an OpenComputers
+controller and robots. The controller reads your pack's mutation data and plans a route from the drones
+in your AE2 network. The robots run the jobs, analyze offspring, and return bees to ME storage.
 
 > [!CAUTION]
-> This is an alpha. Nothing here has run on a live GTNH server yet. Every OpenComputers and GregTech call
-> was taken from the GTNH source, and the breeding logic is covered by a simulator, but expect to confirm
-> a few things in game first. See [Status](#status).
-
-## Changes in this fork
-
-Fixes made after reading the code against the GTNH sources (OpenComputers, GT5-Unofficial, ForestryMC).
-Still untested in game, like upstream.
-
-- **Purification works with real Forestry genetics.** In Forestry a mutation replaces only one parent's
-  genome, so a hit gives a T/x hybrid, not a pure bee. The breeder used to throw away every drone that
-  carried the target on one allele, which left a hybrid princess nothing to purify against except a rare
-  double mutation. It now keeps the best few target carriers as mates until pure target drones exist, and
-  when no carrier is available it mates the princess with the parent she lacks (which can fire the mutation
-  again) instead of the one she already carries. The test simulator modelled mutations as producing pure
-  bees; it now follows `Bee.createOffspring` (primary allele of one parent paired with the secondary of
-  the other, one parent replaced by the template).
-- **Every offspring is analyzed.** A drone showing a parent's name can carry the target as its inactive
-  allele. Set `saveHoney = true` on a job to restore the old skip.
-- **Climate upgrades are counted correctly.** GT's heater, cooler, humidifier and dryer each move the value
-  by 0.125 (`GTApiaryUpgrade`), not 0.25, so the old code installed half of what a climate needed.
-- **Hybrids are no longer dropped on the ground by default** (`keepJunk = true`). A fetch by label can pull
-  any stack with that name, including bees you stored yourself.
-- **Fetches no longer get stuck on the same wrong stack.** The ME network always hands over the first
-  matching stack. Rejected stacks are now held in the robot until the fetch is over, so each retry reaches
-  the next stack; they are returned (or discarded) afterwards. Up to 8 attempts.
-- **Longer timeouts:** `startTimeout` 45 s (GT rechecks an idle machine every 600 ticks), `cycleTimeout`
-  2400 s (long-lived bees without acceleration outlive 15 minutes).
-- **ME Interface slot numbering fixed for GTNH 2.8/2.9.** `setInterfaceConfiguration` takes a 1-based slot
-  (OpenComputers 1.12.68-GTNH, `InterfaceEnvironmentBase.setConfig`), not 0-based. The old default offset of -1
-  made honey and princess requests throw and every other request land one slot off, and `pair` computed its
-  correction from zero instead of from the offset in use, so it could not repair it. Default is now 0 and
-  `pair` corrects relative to the current offset.
-- `repository` lives in `version.lua` (and `installer.lua`), so a fork only has to change it there.
-
-Recommended: give the library its own ME network (or subnetwork) that holds nothing but bees this program
-bred. Labels are the only handle the ME API offers, so a shared network makes fetches slower and less
-predictable.
+> Alpha. The simulator exercises the breeding workflow. Live GTNH operation still needs verification.
+> The setup below uses the GT Industrial Apiary and the ME Interface slot convention for GTNH 2.8 and 2.9.
 
 ## Content
 
 - [Information](#information)
 - [Installation](#installation)
 - [Setup](#setup)
+- [First breeding run](#first-breeding-run)
 - [Configuration](#configuration)
 - [Development](#development)
 - [Status](#status)
@@ -75,21 +38,22 @@ What it does:
 
 - **Numbered catalog.** Every species gets a stable number on the first survey: `1xxx` Forestry, `2xxx` Extra Bees,
   `3xxx` Magic Bees, `4xxx` GregTech. `breed 4137` is all you type.
-- **Whole-chain planning.** The mutation graph comes from `getBeeBreedingData()` through an adapter, so every
-  GT, Magic Bees and Extra Bees mutation and its conditions are known. Ask for a deep species and the planner
-  schedules the steps in between, skipping anything you already own.
+- **Mutation planning.** The controller surveys a Forestry housing through an Adapter. It uses species IDs
+  and parent data when available, with a fallback to the bulk breeding data. `plan` shows the route it can
+  build from your stock, and `routes` shows the available mutations and their conditions.
 - **Requirements handled by robots.** Foundation blocks are swapped under the housing, Industrial Apiary climate
   upgrades (heater, cooler, humidifier, dryer, Hell emulation) are installed per mutation, offspring are analyzed
   in the robot's own inventory. No Mutatron anywhere.
-- **Purity guaranteed.** A job finishes only when the princess is pure-bred and the requested number of pure drones
-  is archived. Only analyzed, pure bees ever enter the library.
+- **Purification and stockpiling.** The robot analyzes offspring and breeds the target back to species purity.
+  It banks surplus drones in the bee-library interface. By default it returns rejected bees through the main
+  interface, so those bees can also appear in ME storage.
 - **Extras on the way.** `breed 4137 extra 4051=64 4060=32` keeps 64 and 32 drones of two intermediates,
   `all 16` keeps 16 of every intermediate. Intermediates are stockpiled in proportion to how unlikely the next
-  mutation is, and a job that runs out of a parent species queues a restock instead of failing.
+  mutation is. The controller can queue a restock when a job runs out of a parent line that can multiply.
 - **Needs lists.** Per request and for the whole game: which foundation blocks are stocked, craftable, or missing a
-  pattern, which climate upgrades, which remote stations.
-- **Live everywhere.** A text GUI on the controller, events posted to Discord, commands accepted from Discord,
-  optional JSON status pushed to a host of your own.
+  pattern, plus the climate upgrades the route calls for.
+- **Monitoring.** The controller shows the queue, cells, and log. Optional integrations include Discord
+  events and commands, and JSON status sent to a custom host.
 
 #### Controls
 
@@ -113,13 +77,14 @@ Type a command and press <kbd>Enter</kbd>. The same words work in Discord with t
 | `routes 1005 [all]` | every mutation that makes a species, best odds first, marking the one the planner picked |
 | `improve 2078 want 2` | breed a better fertility allele onto a species, using a donor from the library |
 | `purify 1005 keep 8` | breed a species with itself until its drones stack, holding out rather than settling |
-| `needs 4137` | foundation blocks, climate upgrades and stations for that chain, with stock status |
+| `needs 4137` | foundation blocks and climate upgrades for the route, with foundation stock status |
 | `find naquadah` | catalog numbers |
 | `status`, `queue`, `cells`, `library [text]` | what is happening |
 | `cancel j12` / `cancel r3` | stop a job or a whole request |
 | `more 1005 keep 64` / `more 1005 keep forever` | just make more of a bee you already have |
 | `keep j12 64` / `keep r3 forever` | change what a queued or running job is working towards |
 | `scan`, `survey` | rescan the ME library, re-read the mutation graph |
+| `retry <job or request ID>` | return failed jobs to the queue after fixing the cause |
 | `pair` | mark each ME interface in turn and ask the robot which one it can reach, then save the answer |
 | `diag` | report what the robot can reach above, below and in front of itself |
 | `settings` | show connection settings; `settings test` probes them; `settings discord webhook <url>`, `settings discord bot <token> <channel>`, `settings host <url>` change them |
@@ -129,8 +94,8 @@ Type a command and press <kbd>Enter</kbd>. The same words work in Discord with t
 ## Installation
 
 > [!CAUTION]
-> The installer needs an Internet Card. If your server runs Java 8 with old certificates, GitHub downloads can
-> fail; then copy the repository onto a floppy and install by hand.
+> Online installation needs an Internet Card on each machine while it runs the installer. The controller
+> also needs the card for Discord or a custom host. Use the manual copy method below if HTTPS downloads fail.
 
 To run the controller you need a computer with:
 
@@ -142,7 +107,7 @@ To run the controller you need a computer with:
 | Hard Disk T2 or T3 | 1 | OpenOS + data |
 | EEPROM (Lua BIOS) | 1 | |
 | Graphics Card T3 | 1 | |
-| Screen T3 | 1+ | a multiblock screen is nicer; T3 gives the 160x50 text grid |
+| Screen T3 | 1+ | the controller GUI uses 120 columns |
 | Keyboard | 1 | |
 | Wireless Network Card T2 | 1 | or wired OC cable to every robot |
 | Internet Card | 1 | installer, Discord, host link |
@@ -162,29 +127,40 @@ Each cell needs a robot assembled in the Electronics Assembler with:
 | Inventory Controller Upgrade | 1 | tier 2 slot |
 | Inventory Upgrade | 2 | 16 slots each; 32 working slots keeps big generations comfortable |
 | Wireless Network Card T2 | 1 | |
-| Graphics Card T1 + Screen T1 + Keyboard | 1 each | optional, but you will want to see the robot's console |
+| Graphics Card T1 + Screen T1 + Keyboard | 1 each | console for the first-run guide and troubleshooting |
+| Internet Card | 1 | needed on the robot for online installation |
 | Disk Drive | 1 | optional, to install OpenOS from a floppy directly on the robot |
 | Pick (tool slot) | 1 | foundation swaps wear it; a self-repairing or high-durability pick |
 | OC Charger + lever | 1 | next to the robot's parking spot; charge speed follows the redstone level |
 
-Install the basic OpenOS on the computer or robot, then run the installer:
+Install OpenOS to the hard disk on both machines. Use the **Lua 5.3** architecture on both CPUs because the
+bundled libraries use Lua 5.3 syntax. Build and cable the [cell and survey housing](#setup) before running
+the first-start guide.
+
+On each machine, download and run the installer from `/home`:
 
 ```shell
-wget -f https://raw.githubusercontent.com/dronf/GTNH-Auto-Bees/main/installer.lua && installer
+cd /home
+wget -f https://raw.githubusercontent.com/dronf/GTNH-Auto-Bees/main/installer.lua installer.lua
+installer
 ```
 
-It downloads the latest release archive into `/home` (falling back to the main branch when no release exists),
-keeps an existing `config.lua`, and offers to create the autostart. To start by hand:
+The installer tries the fork's latest release archive first and fetches the files from `main` if the
+archive is unavailable. It preserves an existing `config.lua` and offers to add `main` to the boot flow
+by writing `/home/.shrc`.
+
+For a manual install, transfer `main.lua`, `config.lua`, `version.lua`, and the entire `src/` and `lib/`
+directories to `/home` on each OpenOS hard disk. Keep the directory structure and save any existing
+`config.lua` before copying. Run this from `/home` on the controller and then on the parked robot:
 
 ```shell
 main
 ```
 
 > [!NOTE]
-> On the first start a setup guide runs in the terminal: it lists the components it can see, lets you pick the
-> ME Interfaces for the cell, the biome, and Discord and host settings, and saves them to `settings.dat`.
-> Run it again any time with `main setup`. On a robot, `main` starts the cell worker instead of the GUI.
-> Autostart is a `.shrc` in `/home` containing `main`.
+> The controller guide asks for a cell name, housing, the two Interface addresses, local temperature and
+> humidity, and optional Discord and host settings. The robot guide asks for its matching cell name and
+> housing. Both write their answers to `/home/settings.dat`. Run `main setup` to revisit the guide.
 
 <a id="setup"></a>
 
@@ -203,8 +179,8 @@ main
 
 #### Description
 
-The mutation list comes from `getBeeBreedingData()` on a Forestry bee housing. Any Forestry housing works; a cheap
-Bee House is enough. Put an Adapter next to it and cable the Adapter to the controller.
+Place an OpenComputers Adapter against a Forestry Bee House and cable it to the controller. Leave this
+connection available for the first-start survey and future `survey` commands.
 
 > [!CAUTION]
 > The GT Industrial Apiary does not expose this component. You need a Forestry housing for the data even if you
@@ -218,10 +194,12 @@ Bee House is enough. Put an Adapter next to it and cable the Adapter to the cont
 - Chest: 1
 - ME Interface: 2
 - Adapter: 2
-- Database Upgrade T1: 2
+- Database Upgrade T1: 1 shared by the controller, installed in one of the cabled Adapters
 - Robot (see the parts table above): 1
 - Charger + lever: 1
-- ME cable to both interfaces, OC cable from both Adapters to the controller
+- Powered AE2 network with available storage, ME cable and a channel for each Interface
+- OC cable from both Interface Adapters to the controller
+- EU supply for the Industrial Apiary, sized for its chosen acceleration
 
 #### Layout
 
@@ -229,7 +207,13 @@ Bee House is enough. Put an Adapter next to it and cable the Adapter to the cont
 
 The robot parks at level 0 facing the housing and only ever moves straight up or down inside its column. Level +1
 gives it the output chest (front) and the main ME Interface (up); level -1 gives it the foundation position
-(front) and the bee-library ME Interface (down). Keep both column blocks free.
+(front) and the bee-library ME Interface (down). Keep both column blocks free. Start the robot parked at
+level 0 facing the apiary. Use matching modem ports on the controller and robot (`7311` by default).
+
+Use two dedicated Interface blocks on the same powered ME network. Leave their stocking configurations empty
+so the controller can manage them. By default the main Interface uses slots 1 for honey, 2 for supplies, and
+9 for returns. The bee-library Interface uses slots 1 for princesses, 2 for drones, and 9 for archiving.
+Both Interfaces need free capacity to accept items back into ME.
 
 #### Industrial Apiary settings
 
@@ -237,11 +221,14 @@ gives it the output chest (front) and the main ME Interface (up); level -1 gives
   goes to the chest, which is what the robot expects.
 - **No Automation upgrade.** It re-mates the returned princess with whatever drone is left and destroys controlled
   pairing.
-- Item output facing the chest on top, speed lock on so installed speed upgrades take effect.
-- Recommended upgrades: one speed (speed 5 is 32x at 8,192 EU/t, speed 6 is 64x at 32,768 EU/t), four lifespan,
-  light, sky, seal. Climate upgrades are added and removed by the robot per job.
-- A dirt block under the machine as the placeholder foundation.
-- Flowers of the target species' flower types inside the queen's territory.
+- Enable item auto-output and point the item output face up into the chest. Start with an empty chest and
+  empty bee input slots.
+- If you use speed or lifespan upgrades, leave room for the climate upgrades the job requires. Set speed to
+  match your power supply.
+- Place dirt under the machine as a starting foundation. Equip a pick that can break the blocks you plan
+  to use.
+- Place the flowers needed by the breeding lines within the queen's territory. Pick a line suited to the
+  cell's climate, light and weather for your first run.
 
 #### Climate upgrade pool
 
@@ -253,14 +240,13 @@ Shared by every cell through the ME network, installed per job:
 | Cooler upgrade | 16 | -0.125 temperature each |
 | Humidifier upgrade | 16 | +0.125 humidity each |
 | Dryer upgrade | 16 | -0.125 humidity each |
-| Hell emulation upgrade | 1 | Hellish temperature without a Nether station |
-| Desert / Plains / Jungle / Winter / Ocean emulation | 1 each | only for biome-type conditions |
+| Hell emulation upgrade | 1 | for Hellish temperature requirements |
 
 #### Consumables
 
 | Item | Rate | Source |
 |---|---|---|
-| Honey Drop | 2 to 5 per generation | centrifuged combs; stocked in the main interface, slot 1 |
+| Honey Drop | 1 per analysis | keep a stack or more in ME; the controller stocks main Interface slot 1 |
 | Foundation blocks | 1 per distinct block, reusable | AE2 patterns; the survey writes the full list to `needs_global.txt` |
 | Pick durability | 1 per foundation swap | |
 | EU | HV plus whatever the speed upgrade adds | |
@@ -269,12 +255,29 @@ Shared by every cell through the ME network, installed per job:
 
 ![Overview](docs/overview.svg)
 
-One controller serves any number of cells. Robots talk to it over the wireless card; the Adapters and ME
-Interfaces of every cell are on the controller's OC network and the ME network respectively.
+One controller serves multiple cells within its component limit. The robots talk to it over the modem.
+Connect each cell's Adapters to the controller's OC network and each Interface to the powered ME network.
 
-> [!NOTE]
-> Remote stations for dimension and biome-ID conditions (an Apiary, Transposer, Adapter, EnderStorage chest pair
-> and an OpenComputers P2P tunnel on a quantum-linked ME network) are planned but not supported by the code yet.
+## First breeding run
+
+1. **Stock ME.** Add Honey Drops, a Forestry princess, and a stack of drones from the same species. For a
+   stockpile test, use an analyzed, species-pure line with fertility 2 or higher. Keep the flowers it uses
+   within reach of the apiary. For a mutation, also stock drones for both parents and any foundation blocks
+   or climate upgrades the route requires.
+2. **Start both machines.** Run `main` on the controller and complete the guide. Choose the upper Interface
+   as main and the lower Interface as bee library. Select `gt_iapiary` and the cell's local climate. The
+   controller surveys the Bee House on first start. Run `main` on the parked robot with the same cell name
+   and housing.
+3. **Check the connection.** Run `cells` on the controller and confirm the robot appears idle. With Honey
+   Drops in ME, run `pair cell1` (substitute your cell name). Wait for pairing to finish, then run `scan`
+   and `library` to check that the controller sees the starter bees.
+4. **Queue a small job.** Run `find <species name>` and note the catalog ID. Run `more <ID> keep 2` for
+   the stockpile test. To try a mutation, run `plan <target ID>` and `needs <target ID>` first, then
+   `breed <target ID> keep 2`.
+5. **Check the result.** Watch the queue and cell status. After the job completes, run `scan` and
+   `library <species name>` to verify that bees reached ME storage. If a job stalls, use the log to find
+   the missing item or machine condition. Use `diag` with the robot idle to check reach, and
+   `retry <job ID>` after correcting a failed job's cause.
 
 ### Reading the timestamps
 
@@ -297,20 +300,17 @@ cannot make more of itself and is refused with a pointer at `improve`.
 
 ### Upgrades you installed yourself
 
-The robot only takes out upgrades that are in the way: one pulling the climate the opposite direction to what a
-job needs, or the excess when a job needs fewer than are fitted. A job with no climate requirement changes
-nothing, so upgrades bolted in to make the cell sit where you want it stay put.
+For a mutation with a temperature or humidity requirement, the robot adjusts that part of the installed
+climate to match the controller's plan, including removing surplus upgrades. Jobs without a climate
+requirement leave the installed climate alone.
 
-If a cell permanently carries some, tell the controller with `fixedUpgrades = { dryer = 2 }` in that cell's
-config. They then count as part of the cell's climate, so planning starts from where the cell actually sits
-rather than from its biome, and every job asks for them again instead of evicting them.
+If a cell always carries a climate upgrade, declare it in that cell's configuration, for example
+`fixedUpgrades = { dryer = 2 }`. The planner includes those upgrades in the baseline for the cell.
 
 ### More than one cell
 
-Each cell declares the temperature and humidity of the biome it stands in. A job that needs a climate goes to
-the cell that needs the fewest upgrades to reach it, so a hot mutation lands in the desert cell and a cold one
-in the tundra cell rather than wherever happened to be free. A job no cell can reach fails saying so instead of
-waiting forever.
+Each cell declares its local temperature and humidity. The controller prefers the compatible idle cell
+that needs the fewest climate upgrades. A job stays queued while no compatible cell is available.
 
 Adding a cell:
 
@@ -335,8 +335,9 @@ Every ME Interface an Adapter exposes and every Database upgrade counts towards 
 
 A queen that refuses to work is nearly always missing her flowers, the right temperature, the right air, or
 somewhere to put what she makes. The robot compares her genome against the cell's biome and the machine's slots
-and names the reason: `she wants Hot, the hive is Normal` or `she needs flowersSnow flowers in range`. Climate
-it fixes itself with upgrades; the rest reaches you as a warning.
+and logs possible causes. Check the actual machine error display, the installed upgrades, the flowers
+and power. Automatic climate changes follow the mutation's parsed requirements. A stockpile job uses the
+cell's existing climate.
 
 ### Pristine before ignoble
 
@@ -356,12 +357,9 @@ instead of settling for species purity.
 
 ### Finished means the drones stack
 
-A bee is done when its drones pile into one stack, which happens only when every chromosome carries the same
-allele twice. Species purity is not enough: two Common drones that differ in fertility or speed sit in separate
-stacks and pass on unlike offspring. A job counts only drones that breed true towards the number you asked for,
-and prefers such a bee as the mate so the line converges. Everything species-pure still reaches the library, it
-just does not count. After 60 generations of holding out the job accepts what it has, says so in the log, and
-the card notes that the drones do not all stack.
+The breeder prefers species-pure drones with matching alleles on each chromosome. Ordinary jobs can
+accept species-pure drones with differing alleles once the generation threshold is reached (60 by
+default). Use `purify` to keep trying for matching alleles up to the job's generation limit.
 
 ### Lucky bees are kept
 
@@ -369,14 +367,13 @@ A princess carrying the target mated with a parent drone can mutate into the ste
 chasing Common turns up the occasional Cultivated. Any bee that is pure of any species goes to the library,
 whatever the job was for, and the log says what turned up.
 
-Only hybrids are dropped, and only because a hybrid carries the same label as a pure bee of its active species:
-put one in the network and the next fetch may hand it straight back, which costs a cycle to reject. Set
-`keepJunk = true` in the cell config to keep them anyway and sort them out yourself.
+By default `keepJunk = true` sends rejected bees back to ME through the main Interface. Because AE2 stocks
+bees by label, a hybrid can show up on a later fetch. The robot checks the genome after fetching and can
+try another stack. Keep the shared network clear of unwanted same-label stock if fetches repeatedly fail.
 
 ### Odds are weighed against your stock
 
-Every attempt spends a drone of each parent, so what matters is not the mutation's chance but the chance of a
-hit before the drones run out: `1 - (1 - p)^n`. One drone at 30% is a single attempt and usually fails; Forest
+The planner estimates the chance of a hit before the available parent drones run out as `1 - (1 - p)^n`. One drone at 30% is a single attempt and usually fails; Forest
 and Meadows in quantity at 15% is a near certainty. The planner scores routes that way, so it prefers the one
 your library can actually finish, and `routes` prints the arithmetic per route. A line that cannot breed more of
 itself is capped at what you hold; a stockpilable one is credited with what it could breed, minus a little for
@@ -389,12 +386,11 @@ including routes the mods add beyond the Forestry ones. Where several routes mak
 picks by cost: better odds are cheaper, a required foundation block or climate costs extra, and a species you
 already own costs nothing to obtain. `routes 1005` prints them all and marks the one it chose.
 
-### A species is never run dry
+### Restocking parent drones
 
-Every attempt spends a drone of each parent, and a species down to its last one is a species the planner routes
-around. `droneFloor` (4 by default) is the level below which a parent is bred back up: a chain tops up what it
-is short of before it starts, and a finished job tops up what it spent. A line that cannot multiply is not asked
-to, and only one top-up per species is ever in flight.
+The controller uses `droneFloor` (4 by default) to decide when to request a parent top-up. The library can
+still run out, especially if multiple jobs share the same drones or a line cannot multiply. Check `library`
+and add stock if a job is waiting for parents.
 
 ### Fertility 1 lines cannot be stockpiled
 
@@ -412,8 +408,8 @@ species is stockpilable and the mark is cleared automatically.
 
 ### Why it breeds a parent species first
 
-Every attempt at a mutation burns one drone of each parent, and a step with a 15% chance needs about seven
-attempts, so a request first queues a stockpile job for any parent the library is short of. That job mates the
+A step with a 15% chance takes about seven attempts on average. The controller can queue a stockpile
+job when the library is short of a parent that can multiply. That job mates the
 species with itself until it has banked enough drones. The `cells` line shows how far along it is, as
 `archived 4/11`. If the count sits still for many generations the log says so.
 
@@ -426,9 +422,9 @@ take the drones`. Check that the interface is on the ME network, has a channel, 
 
 ### Honey drops are not optional
 
-Every offspring is analyzed before the robot can tell a mutation from junk, and analysis costs one Honey Drop.
-Keep them in the ME network; `library` prints how many are left. Without them a job stops with `analysis needs
-Honey Drop` and waits until some arrive, and no bee is ever voided unread.
+Analysis uses one Honey Drop per unanalyzed stack. Keep Honey Drops in ME and check the count with
+`library`. If a job reports `analysis needs Honey Drop`, replenish the supply so the controller can
+resume it.
 
 ### When a fetch never arrives
 
@@ -472,12 +468,11 @@ controller = {
     cell1 = {
       housing = "gt_iapiary",
       mainInterface = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", -- interface above the robot column
-      beeInterface = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",  -- interface below the robot column
+      beeInterface = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",  -- interface below the robot column
       base = { temp = 0.8, hum = 0.4 },                       -- biome values where the cell stands
     },
   },
-  stations = {},                     -- remote stations you have built, e.g. dimension = { ["End"] = true }
-  defaults = { keepDrones = 8, droneSupply = 16, maxGenerations = 400, warnAfter = 60 },
+  defaults = { keepDrones = 8, droneFloor = 4, droneSupply = 16, maxGenerations = 400, warnAfter = 60 },
 },
 ```
 
@@ -489,9 +484,12 @@ Used when `main` runs on a robot. `name` must match a key in `controller.cells`.
 cell = {
   name = "cell1",
   port = 7311,
-  housing = "gt_iapiary",            -- gt_iapiary | apiary | magic_apiary | alveary
+  housing = "gt_iapiary",            -- matches the controller's housing for this cell
   slots = { honey = 1, scratch = 2, firstWork = 3 },
-  cycleTimeout = 900,                -- seconds a queen may work before the cell is called stuck
+  keepJunk = true,
+  startTimeout = 45,
+  cycleTimeout = 2400,               -- seconds allowed for a queen's cycle
+  requestTimeout = 90,
   keepUpgrades = { speed = true, lifespan = true }, -- never evicted to make room for climate upgrades
 },
 ```
@@ -514,7 +512,7 @@ logger = loggerLib:newFormConfig({
 
 #### Discord
 
-A webhook URL is all that is needed. Discord webhooks are one-way, so this is what each level gives you:
+Discord is optional. Connect the controller's Internet Card before using any of these modes:
 
 | Mode | You provide | You get |
 |---|---|---|
@@ -527,8 +525,7 @@ Emerald, Certus, Fluix, Sapphire, Water and a few more) every label carries the 
 `[4060] Diamond (GregTech)` and `[2033] Diamond (Extra Bees)`, `find diamond` lists both, and `breed` asks for the
 number when a bare name is shared.
 
-Every card shows the species icon, rendered the way the game does it (outline and body tinted with the species
-colours) for all 441 Forestry, Extra Bees, Magic Bees and GregTech species; the icons live in `docs/bees/` and are
+Species cards can show icons from `docs/bees/`. The icons are
 regenerated from your modpack's jars with `python tools/bee_images.py`. In bot mode every command works from the
 channel: `!find naqua`, `!plan 4137`, `!needs 4137`, `!breed 4137 keep 16`, `!library`, `!status`, `!settings` and the
 rest. Species-centred replies come back as embeds with the icon, everything else as a code block.
@@ -536,7 +533,8 @@ rest. Species-centred replies come back as embeds with the icon, everything else
 [How to create a Discord webhook](https://www.svix.com/resources/guides/how-to-make-webhook-discord/). Enter it in
 the setup guide or with `settings discord webhook <url>` on the controller; it is stored in `settings.dat`, never in
 `config.lua`. For commands, create an application in the Discord developer portal, add a bot, invite it with
-*Send Messages* and *Read Message History*, then `settings discord bot <token> <channel id>`.
+*View Channel*, *Send Messages*, *Embed Links*, and *Read Message History*, then run
+`settings discord bot <token> <channel id>`.
 
 ```lua
 discord = {
@@ -564,6 +562,7 @@ the URL and reports the HTTP code and round trip time; the setup guide offers th
 host = {
   url = "",            -- e.g. http://192.168.1.10:8080
   pushInterval = 30,   -- seconds, 0 = never push
+  relay = false,       -- for a host that only accepts status; use true for the Discord relay
 },
 ```
 
@@ -588,7 +587,7 @@ Repository layout:
 main.lua               entry point: controller GUI on a computer, cell worker on a robot
 config.lua             configuration template
 version.lua            programVersion / configVersion for auto update
-installer.lua          downloads the latest release into /home
+installer.lua          installs from a release archive or the main branch into /home
 lib/                   vendored MIT libraries: program, gui, logger, state machine, discovery
 src/graph.lua          mutation graph and planner (hyper-edge shortest path)
 src/breeder.lua        per-job breeding state machine, hardware independent
@@ -614,15 +613,9 @@ test/                  Lua 5.2 tests and the breeding simulator
 
 ## Status
 
-Alpha. The program has **not run on a live GTNH server yet**. The first things to confirm in game:
-
-- robot access to the Industrial Apiary's queen and drone slots (the configured Lua slots `6` and `7`
-  correspond to the machine's zero-based slots `5` and `6`)
-- the display labels of the Industrial Apiary upgrade items (`upgradeKeys` in `config.lua`)
-- the exact text of GregTech's dimension and biome conditions (the survey lists anything it could not parse)
-
-Not built yet: remote dimension and biome stations, robot placement of flowers, harmful-effect handling beyond a
-blacklist, one robot serving several housings.
+The simulator covers job dispatch, bee genetics and the ME inventory workflow. In game, verify the robot
+can access both Interfaces and the Industrial Apiary, the apiary returns offspring to the output chest,
+and the controller recognizes the upgrade labels in your pack.
 
 <a id="credits"></a>
 

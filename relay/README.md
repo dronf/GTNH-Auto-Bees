@@ -29,26 +29,29 @@ from the status the controller pushes and shows the icon of the species being br
 
 ## 2. Run it on your host
 
-Needs Python 3.10 or newer.
+On the host, install Python 3.10 or newer with virtual environment support. Copy `relay/.env.example`
+to `relay/.env` and set `DISCORD_TOKEN` and `DISCORD_CHANNEL`. Run the launcher from the `relay`
+directory:
 
-```
-cd relay
-copy .env.example .env        (cp on Linux)
-edit .env                     -> DISCORD_TOKEN, DISCORD_CHANNEL
-run.bat                       (./run.sh on Linux)
-```
+- Windows PowerShell: `.\run.bat`
+- Linux: `sh run.sh`
 
-The script creates a virtual environment, installs `discord.py`, starts the bot and restarts it if it ever
-stops. On first start it posts the main card and registers `/bee` on your server. Open the host's firewall
+The script creates a virtual environment, installs the packages in `requirements.txt`, and starts the
+bot. The launcher restarts the bot after it exits. On first start it posts the main card and registers `/bee` on your server. Open the host's firewall
 for the relay port (8080 by default) from the Minecraft server's address.
 
-To check the HTTP side without Discord: `python test_relay.py`.
+To check the HTTP side without a Discord connection, run `.venv\Scripts\python test_relay.py`
+on Windows or `.venv/bin/python test_relay.py` on Linux after installing the dependencies.
 
 ## 3. Point the controller at it
 
-On the controller: `settings host http://<host ip>:8080`. From then on it polls `/commands` every few seconds,
-answers clicks, and pushes its status to `/status`. Leave `discord.token` empty in the controller's settings
-when the bot handles commands; the webhook keeps posting event cards as before.
+Connect an Internet Card to the controller and run `settings host http://<host-ip>:8080`, using the
+address the Minecraft server can reach. If you changed `RELAY_PORT`, use that port in the URL. Keep
+`host.relay = true` in `config.lua` and use a positive `host.pushInterval` for status updates.
+
+The controller polls `/commands`, sends responses to `/result`, and pushes status to `/status`. Leave
+the controller's bot token empty when the relay handles commands. You can still configure a webhook
+on the controller for event cards.
 
 Optional: set `RELAY_SECRET` in `.env` and the same value as `host.secret` in `config.lua` to reject requests
 from anyone else.

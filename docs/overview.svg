@@ -37,9 +37,9 @@
   <text x="420" y="242" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:11px;fill:#4b5563;text-anchor:middle">on the main ME Interface</text>
   <line x1="250" y1="228" x2="328" y2="228" style="stroke:#374151;stroke-width:2" marker-end="url(#a)"/>
 
-  <!-- Adapter + DB on bee interface -->
+  <!-- Adapter on bee interface -->
   <rect x="330" y="290" width="180" height="56" rx="8" style="fill:#e5e7eb;stroke:#374151;stroke-width:2"/>
-  <text x="420" y="312" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;fill:#1f2937;text-anchor:middle">Adapter + Database</text>
+  <text x="420" y="312" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;fill:#1f2937;text-anchor:middle">Adapter</text>
   <text x="420" y="332" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:11px;fill:#4b5563;text-anchor:middle">on the bee-library ME Interface</text>
   <line x1="250" y1="300" x2="328" y2="318" style="stroke:#374151;stroke-width:2" marker-end="url(#a)"/>
   <text x="262" y="270" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:11px;fill:#374151">stock / craft</text>
@@ -98,7 +98,7 @@
   <!-- legend strip -->
   <g style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:11px;fill:#4b5563">
     <line x1="560" y1="130" x2="600" y2="130" style="stroke:#374151;stroke-width:2"/>
-    <text x="608" y="134">OC network (cable or P2P tunnel)</text>
+    <text x="608" y="134">OC network (cable)</text>
     <line x1="560" y1="150" x2="600" y2="150" style="stroke:#3730a3;stroke-width:2"/>
     <text x="608" y="154">ME network (AE2)</text>
     <line x1="560" y1="170" x2="600" y2="170" style="stroke:#0f766e;stroke-width:2;stroke-dasharray:7 5"/>
@@ -106,6 +106,6 @@
     <line x1="780" y1="130" x2="820" y2="130" style="stroke:#b45309;stroke-width:2"/>
     <text x="828" y="134">internet card</text>
     <text x="780" y="154">one controller serves</text>
-    <text x="780" y="170">any number of cells</text>
+    <text x="780" y="170">multiple cells</text>
   </g>
 </svg>
