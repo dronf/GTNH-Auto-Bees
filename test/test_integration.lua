@@ -540,6 +540,18 @@ T.run("integration: jobs go to the cell whose climate suits them", function()
   T.eq(ctl:cellCost(plain, ctl.cells.cell1), 0, "a job with no climate demand costs nothing anywhere")
   T.ok(ctl:cellCost(hot, ctl.cells.cell2) < ctl:cellCost(hot, ctl.cells.cell1), "fewer upgrades where the biome helps")
 
+  local saved = ctl.S
+  cold.status, plain.status = "pending", "pending"
+  ctl.S = { requests = { { status = "active", jobs = { cold.id, plain.id } } },
+    jobs = { [cold.id] = cold, [plain.id] = plain } }
+  -- A plain apiary in a desert cannot get cold. A compatible cell may be busy.
+  c2.housing = "apiary"
+  local selected, name = ctl:nextReadyJob({ "cell2" })
+  T.eq(selected and selected.id, plain.id, "a later compatible job can run")
+  T.eq(name, "cell2", "assigns the available cell")
+  T.eq(cold.status, "pending", "the cold job can still run later")
+  ctl.S = saved
+
   ctl.cfg.cells.cell2 = nil
   ctl.cells.cell2 = nil
 end)
@@ -708,6 +720,15 @@ end)
 
 -- Upgrades bolted into the machine on purpose were being pulled out by the
 -- next job that had nothing to say about climate.
+T.run("integration: controller finds the humidifier under its climate key", function()
+  env.side = "controller"
+  local label = "Industrial Apiary Humidifier Upgrade"
+  me.add({ name = "gregtech:apiaryUpgrade", label = label, size = 4 })
+  ctl:scanUpgradeLabels()
+  T.eq(ctl:findUpgradeLabel("humidifier"), label, "lookup uses the canonical upgrade key")
+  env.side = "robot"
+end)
+
 T.run("integration: upgrades nobody asked about are left alone", function()
   env.side = "robot"
   env.world.housing.upgrades = { { label = "Industrial Apiary Dryer Upgrade", size = 2, key = "dryer" } }
@@ -740,6 +761,50 @@ T.run("integration: upgrades nobody asked about are left alone", function()
   T.ok((job.climate.dryer or 0) >= 2, "and the fixed dryers are asked for again, not evicted: "
     .. tostring(job.climate.dryer))
   ctl.cfg.cells.cell1.fixedUpgrades = nil
+
+  env.side = "robot"
+  env.world.housing.upgrades = {
+    { label = "Industrial Apiary Heater Upgrade", size = 2, key = "heater" },
+    { label = "Industrial Apiary Dryer Upgrade", size = 2, key = "dryer" },
+  }
+  T.ok(cell.api.setClimate({}, { min = "Normal", max = "Normal" }), "normal needs no heater in this biome")
+  T.eq(env.world.housing.upgrades[1], nil, "stale heat is removed even though the target needs zero upgrades")
+  T.eq(env.world.housing.upgrades[2].size, 2, "humidity is left alone when unconstrained")
   env.world.housing.upgrades = {}
+  env.side = "robot"
+end)
+
+T.run("integration: undelivered jobs can be dispatched again", function()
+  env.side = "controller"
+  local c = ctl.cells.cell1
+  local savedState, savedSend, savedPath = ctl.S, ctl.link.send, ctl.statePath
+  local savedStatus, savedJob = c.status, c.job
+  local uid = U("Common")
+  local job = { id = "j-test", kind = "stock", status = "pending", a = uid, b = uid, target = uid }
+  local request = { status = "active", jobs = { job.id } }
+  ctl.S = { requests = { request }, jobs = { [job.id] = job } }
+  ctl.statePath = dataDir .. "/dispatch-test.dat"
+  c.status, c.job = "idle", nil
+  ctl.link.send = function() return false, "unreachable" end
+
+  ctl:dispatch()
+  T.eq(job.status, "pending", "send failure returns the job to the queue")
+  T.eq(c.job, nil, "failed delivery releases the assignment")
+  T.eq(c.status, "offline", "dispatch waits for a fresh robot announcement")
+
+  ctl.link.send = function() return true end
+  c.status = "idle"
+  ctl:dispatch()
+  T.eq(job.status, "running", "the robot can receive the job after reconnecting")
+
+  request.status, job.status, job.error = "cancelled", "failed", "cancelled"
+  ctl:handleMessage({ type = "result", remote = c.addr, from = c.name, payload = { job = job.id, ok = true } })
+  T.eq(job.error, "cancelled", "late result cannot undo a cancellation")
+  T.eq(request.status, "cancelled", "request remains cancelled")
+  T.eq(c.job, nil, "matching result frees the robot")
+
+  os.remove(ctl.statePath)
+  ctl.S, ctl.link.send, ctl.statePath = savedState, savedSend, savedPath
+  c.status, c.job = savedStatus, savedJob
   env.side = "robot"
 end)

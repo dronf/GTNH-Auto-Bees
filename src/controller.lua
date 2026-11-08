@@ -582,9 +582,10 @@ function controller:new(cfg, logger)
 
   function obj:cellCost(job, c)
     local hs = housing.get(c.housing or (c.cfg or {}).housing or "gt_iapiary")
-    if not hs then return nil end
+    if not hs or (job.kind == "mutate" and not hs.caps.mutations) then return nil end
+    if job.foundation and not hs.caps.foundation then return nil end
     if not (job.needTemp or job.needHum) then return 0 end
-    if not (hs.caps or {}).climateUpgrades and not (hs.caps or {}).alvearyClimate then
+    if not hs.caps.climateUpgrades then
       -- this housing cannot be nudged, so the biome has to be right already
       local base = self:effectiveBase(c)
       local sol = climate.solve({ baseTemp = base.temp, baseHum = base.hum,
@@ -612,12 +613,15 @@ function controller:new(cfg, logger)
     return bestName, bestCost
   end
 
-  function obj:nextReadyJob()
+  function obj:nextReadyJob(idle)
     for _, req in ipairs(self.S.requests) do
       if req.status == "active" then
         for _, jid in ipairs(req.jobs) do
           local job = self.S.jobs[jid]
-          if job and self:jobReady(job) then return job end
+          if job and self:jobReady(job) then
+            local name, cost = self:bestCellFor(job, idle)
+            if name then return job, name, cost end
+          end
         end
       end
     end
@@ -629,7 +633,7 @@ function controller:new(cfg, logger)
   end
 
   function obj:updateRequestStatus(req)
-    if not req then return end
+    if not req or req.status == "cancelled" then return end
     local allDone, anyFailed = true, false
     for _, jid in ipairs(req.jobs) do
       local job = self.S.jobs[jid]
@@ -724,19 +728,16 @@ function controller:new(cfg, logger)
     self.upgradeLabels = {}
     self.upgradeLabelsAt = util.now()
     if not self.me then return end
-    local keys = {}
-    for key in pairs(self.cfg.upgradeKeys or {}) do keys[#keys + 1] = tostring(key):lower() end
-    if #keys == 0 then
-      for _, key in ipairs({ "heater", "cooler", "humidif", "dryer", "hell", "desert", "plains",
-                             "jungle", "winter", "ocean", "speed", "lifespan" }) do
-        keys[#keys + 1] = key
-      end
-    end
+    local keys = self.cfg.upgradeKeys or {
+      heater = "heater", cooler = "cooler", humidifier = "humidif", dryer = "dryer", hell = "hell",
+      desert = "desert", plains = "plains", jungle = "jungle", winter = "winter", ocean = "ocean",
+      speed = "speed", lifespan = "lifespan",
+    }
     for _, st in ipairs(self.me:items()) do
       local l = tostring(st.label or ""):lower()
       if l:find("apiary", 1, true) then
-        for _, key in ipairs(keys) do
-          if not self.upgradeLabels[key] and l:find(key, 1, true) then self.upgradeLabels[key] = st.label end
+        for key, needle in pairs(keys) do
+          if not self.upgradeLabels[key] and l:find(needle:lower(), 1, true) then self.upgradeLabels[key] = st.label end
         end
       end
     end
@@ -763,7 +764,7 @@ function controller:new(cfg, logger)
       -- upgrades the cell always carries are part of what it is, so they are
       -- asked for again rather than being taken out
       for key, n in pairs((c.cfg or {}).fixedUpgrades or {}) do
-        job.climate[key] = math.max(job.climate[key] or 0, n)
+        job.climate[key] = (job.climate[key] or 0) + n
       end
     else
       job.climate = {}
@@ -771,11 +772,6 @@ function controller:new(cfg, logger)
     if not self.me then return true end
     if job.foundation and self.me:countLabel(job.foundation) == 0 then
       return "wait", job.foundation
-    end
-    for key, n in pairs(job.climate or {}) do
-      local label = self:findUpgradeLabel(key)
-      if not label then return "wait", key .. " upgrade for the Industrial Apiary" end
-      if self.me:countLabel(label) < n then return "wait", label .. " x" .. n end
     end
     return true
   end
@@ -788,8 +784,10 @@ function controller:new(cfg, logger)
     job.waitSince = job.waitSince or util.now()
     job.cell = nil
     local crafted = false
-    if self.me and self.me:hasPattern(item) then
-      local status = self.me:craft(item, 1)
+    local label = item:gsub(" x%d+$", "")
+    local count = tonumber(item:match(" x(%d+)$")) or 1
+    if self.me and self.me:hasPattern(label) then
+      local status = self.me:craft(label, count)
       crafted = status ~= nil
       job.lastCraft = util.now()
     end
@@ -853,43 +851,41 @@ function controller:new(cfg, logger)
       end
       if #idle == 0 then return end
       table.sort(idle)
-      local job = self:nextReadyJob()
+      local job, name, cost = self:nextReadyJob(idle)
       if not job then return end
-      local name, cost = self:bestCellFor(job, idle)
-      if not name then
+      local c = self.cells[name]
+      if cost and cost > 0 then
+        self:log("%s goes to %s: %d climate upgrade(s) needed there", job.id, name, cost)
+      end
+      local ok, why = self:prepareJob(job, c)
+      if ok == "wait" then
+        self:waitFor(job, why)
+      elseif not ok then
         job.status = "failed"
-        job.error = "no cell can reach that climate"
-        self:notify("%s needs a climate none of the cells can reach", job.id)
+        job.error = why
+        self:notify("%s cannot start: %s", job.id, why)
         self:updateRequestStatus(self:requestOf(job))
         self:saveState()
       else
-        local c = self.cells[name]
-        if cost and cost > 0 then
-          self:log("%s goes to %s: %d climate upgrade(s) needed there", job.id, name, cost)
-        end
-        local ok, why = self:prepareJob(job, c)
-        if ok == "wait" then
-          self:waitFor(job, why)
-        elseif not ok then
-          job.status = "failed"
-          job.error = why
-          self:notify("%s cannot start: %s", job.id, why)
-          self:updateRequestStatus(self:requestOf(job))
+        job.status = "running"
+        job.cell = name
+        job.started = util.now()
+        c.job = job.id
+        c.status = "busy"
+        c.gen, c.phase = 0, "prepare"
+        local sent, sendError = self.link:send(c.addr, "job", {
+          id = job.id, target = job.target, a = job.a, b = job.b, names = job.names, chance = job.chance,
+          kind = job.kind, donor = job.donor, wantFertility = job.wantFertility, strictAfter = job.strictAfter,
+          keepDrones = job.keepDrones, wantPrincess = job.wantPrincess, foundation = job.foundation,
+          climate = job.climate, droneSupply = job.droneSupply, maxGenerations = job.maxGenerations, warnAfter = job.warnAfter,
+          base = self:effectiveBase(c), needTemp = job.needTemp, needHum = job.needHum,
+        })
+        if not sent then
+          job.status, job.cell, job.started = "pending", nil, nil
+          c.job, c.status, c.gen, c.phase = nil, "offline", nil, nil
+          self:warn("could not send %s to %s: %s", job.id, name, tostring(sendError or "unreachable"))
           self:saveState()
         else
-          job.status = "running"
-          job.cell = name
-          job.started = util.now()
-          c.job = job.id
-          c.status = "busy"
-          c.gen, c.phase = 0, "prepare"
-          self.link:send(c.addr, "job", {
-            id = job.id, target = job.target, a = job.a, b = job.b, names = job.names, chance = job.chance,
-            kind = job.kind, donor = job.donor, wantFertility = job.wantFertility, strictAfter = job.strictAfter,
-            keepDrones = job.keepDrones, wantPrincess = job.wantPrincess, foundation = job.foundation,
-            climate = job.climate, droneSupply = job.droneSupply, maxGenerations = job.maxGenerations, warnAfter = job.warnAfter,
-            base = self:effectiveBase(c),
-          })
           local climateText = {}
           for k, n in pairs(job.climate or {}) do climateText[#climateText + 1] = k .. " x" .. n end
           self:card("start", string.format("%s started on %s: %s", job.id, name, self:label(job.target)), {
@@ -960,7 +956,11 @@ function controller:new(cfg, logger)
       local key = tostring(p.upgrade):lower()
       local found = self:findUpgradeLabel(key)
       if not found then return fail("no '" .. key .. "' apiary upgrade in the ME network") end
-      local ok, err = self.me:stockIntoInterface(mainIface, slots.main.supply, { label = found }, p.count or 1, 1)
+      local count = p.count or 1
+      if self.me:countLabel(found) < count then
+        return fail("need " .. found .. " x" .. count)
+      end
+      local ok, err = self.me:stockIntoInterface(mainIface, slots.main.supply, { label = found }, count, 1)
       if not ok then return fail(err) end
       self.requestsByReqId[p.reqId] = { iface = mainIface, slot = slots.main.supply }
       self.link:send(remote, "ready", { reqId = p.reqId, slot = slots.main.supply })
@@ -1018,10 +1018,12 @@ function controller:new(cfg, logger)
       else
         -- the robot found something missing that the controller can wait for
         local reason = info.reason or ""
-        local missingItem = reason:match("^foundation: no (.-) available") or reason:match("no (%S+) upgrades")
+        local missingUpgrade = reason:match("^climate: no (%S+) upgrades:")
+        local missingItem = reason:match("^foundation: no (.-) available")
+          or reason:match("^climate: no %S+ upgrades: need (.+ x%d+)$")
+          or (missingUpgrade and missingUpgrade .. " upgrade for the Industrial Apiary")
           or reason:match("analysis needs (.-):")
         if missingItem then
-          if reason:match("upgrades") then missingItem = missingItem .. " upgrade for the Industrial Apiary" end
           job.notified = nil
           self:waitFor(job, missingItem)
           self:updateRequestStatus(req)
@@ -1125,11 +1127,16 @@ function controller:new(cfg, logger)
         self:log("%s error: %s", c.name, tostring(d.reason))
       end
     elseif msg.type == "result" then
+      if not p.job or c.job ~= p.job then return end
       local job = self.S.jobs[p.job]
       c.job = nil
       c.status = "idle"
       c.gen, c.phase = nil, nil
-      if job then self:finishJob(job, p.ok, p) end
+      if job and job.status == "running" then
+        self:finishJob(job, p.ok, p)
+      else
+        self:scanLibrary(true)
+      end
     elseif msg.type == "aborted" then
       local job = self.S.jobs[p.job]
       if job and job.status == "running" then

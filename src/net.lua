@@ -34,14 +34,14 @@ function net:send(addr, msgType, payload)
   if not self.modem then return false, "no modem" end
   local ok, res = pcall(self.modem.send, addr, self.port, net.TAG, self:encode(msgType, payload))
   if not ok then return false, tostring(res) end
-  return res ~= false
+  return not not res
 end
 
 function net:broadcast(msgType, payload)
   if not self.modem then return false, "no modem" end
   local ok, res = pcall(self.modem.broadcast, self.port, net.TAG, self:encode(msgType, payload))
   if not ok then return false, tostring(res) end
-  return true
+  return not not res
 end
 
 --- Decode a "modem_message" signal. Returns msg or nil.
@@ -49,7 +49,8 @@ end
 function net:decode(name, _, remoteAddr, port, distance, tag, data)
   if name ~= "modem_message" or port ~= self.port or tag ~= net.TAG or type(data) ~= "string" then return nil end
   local t = util.unserialize(data)
-  if type(t) ~= "table" or not t.t then return nil end
+  if type(t) ~= "table" or type(t.t) ~= "string" or type(t.from) ~= "string"
+    or (t.p ~= nil and type(t.p) ~= "table") then return nil end
   return { type = t.t, from = t.from, seq = t.seq, payload = t.p or {}, remote = remoteAddr, distance = distance }
 end
 

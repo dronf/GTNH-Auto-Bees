@@ -170,7 +170,7 @@ Each cell needs a robot assembled in the Electronics Assembler with:
 Install the basic OpenOS on the computer or robot, then run the installer:
 
 ```shell
-wget -f https://raw.githubusercontent.com/v3rysp3d/GTNH-Auto-Bees/main/installer.lua && installer
+wget -f https://raw.githubusercontent.com/dronf/GTNH-Auto-Bees/main/installer.lua && installer
 ```
 
 It downloads the latest release archive into `/home` (falling back to the main branch when no release exists),
@@ -616,8 +616,8 @@ test/                  Lua 5.2 tests and the breeding simulator
 
 Alpha. The program has **not run on a live GTNH server yet**. The first things to confirm in game:
 
-- the queen and drone slot numbers of the Industrial Apiary as seen through the Inventory Controller
-  (`6` and `7` are configured in `src/housing.lua`)
+- robot access to the Industrial Apiary's queen and drone slots (the configured Lua slots `6` and `7`
+  correspond to the machine's zero-based slots `5` and `6`)
 - the display labels of the Industrial Apiary upgrade items (`upgradeKeys` in `config.lua`)
 - the exact text of GregTech's dimension and biome conditions (the survey lists anything it could not parse)
 

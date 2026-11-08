@@ -76,11 +76,13 @@ function cell:new(cfg, logger)
         link:send(msg.remote, "busy", { job = msg.payload.id })
       else
         pendingJob = msg.payload
+        cancelRequested = false
         controller = controller or msg.remote
         link:send(msg.remote, "accepted", { job = msg.payload.id })
       end
     elseif msg.type == "cancel" then
-      cancelRequested = true
+      local job = state.job or pendingJob
+      if msg.remote == controller and job and job.id == msg.payload.job then cancelRequested = true end
     elseif msg.type == "update" then
       -- the running job's table is the one the breeder reads, so changing it
       -- here changes the goal mid-run
@@ -566,6 +568,7 @@ function cell:new(cfg, logger)
     local t0 = util.now()
     local started, sawQueen, sawPrincess = false, false, false
     while util.now() - t0 < cfg.startTimeout do
+      if cancelRequested then return "cancelled" end
       local q = queenSlotStack()
       if q and genome.kind(q) == "queen" then started, sawQueen = true, true break end
       if q then sawPrincess = true end
@@ -628,10 +631,15 @@ function cell:new(cfg, logger)
   end
 
   function api.collect()
-    goTo(1)
+    local fromChest = hs.outputs == "chest"
+    goTo(fromChest and 1 or 0)
+    local slots = hs.slots.outputs or {}
+    if fromChest then
+      local size = invctl.getInventorySize(sides.front) or 0
+      for slot = 1, size do slots[slot] = slot end
+    end
     local n = 0
-    local size = invctl.getInventorySize(sides.front) or 0
-    for s = 1, size do
+    for _, s in ipairs(slots) do
       local st = invctl.getStackInSlot(sides.front, s)
       if st then
         local target = firstEmpty()
@@ -639,7 +647,8 @@ function cell:new(cfg, logger)
         robot.select(target)
         if invctl.suckFromSlot(sides.front, s) then
           if genome.isBee(st) then n = n + 1
-          else invctl.dropIntoSlot(sides.up, cfg.interface.main.dump) end
+          else dumpSlot(target) end
+          if not fromChest then goTo(0) end
         end
       end
     end
@@ -766,8 +775,9 @@ function cell:new(cfg, logger)
     local slot = firstEmpty() or cfg.slots.scratch
     robot.select(slot)
     local ok, moved = pcall(beekeeper.removeIndustrialUpgrade, beeSide(), index, count)
-    if ok and (tonumber(moved) or 0) > 0 then dumpSlot(slot) return true end
-    return false
+    if not ok or (tonumber(moved) or 0) == 0 then return false end
+    dumpSlot(slot)
+    return moved == count
   end
 
   --- Upgrades that pull the climate the opposite way to the one asked for.
@@ -777,22 +787,23 @@ function cell:new(cfg, logger)
     heater = "cooler", cooler = "heater", humidifier = "dryer", dryer = "humidifier",
   }
 
-  function api.setClimate(counts)
+  function api.setClimate(counts, needTemp, needHum)
     if not hs.caps.climateUpgrades then return true end
     counts = counts or {}
     local installed = installedUpgrades()
-    local wantsClimate = next(counts) ~= nil
     for i, u in pairs(installed) do
-      -- Only take out what is in the way. Upgrades nobody asked about stay:
-      -- they are usually there because the cell needs them to sit where it
-      -- does, and pulling them changes the hive out from under the bees.
-      local conflicts = u.key and climateOpposite[u.key] and (counts[climateOpposite[u.key]] or 0) > 0
-      local tooMany = u.key and cfg.climateKeys[u.key] and (counts[u.key] or 0) > 0 and u.count > counts[u.key]
-      if wantsClimate and (conflicts or tooMany) then
-        local excess = tooMany and (u.count - counts[u.key]) or u.count
-        if removeUpgrade(i, excess) then
-          if excess >= u.count then installed[i] = nil else u.count = u.count - excess end
+      local key = u.key
+      local wanted = counts[key] or 0
+      local temperature = key == "heater" or key == "cooler" or key == "hell"
+      local humidity = key == "humidifier" or key == "dryer"
+      local exact = (needTemp and temperature) or (needHum and humidity)
+      local opposite = climateOpposite[key]
+      local conflicts = wanted == 0 and opposite and (counts[opposite] or 0) > 0
+      if u.count > wanted and (exact or wanted > 0 or conflicts) then
+        if not removeUpgrade(i, u.count - wanted) then
+          return false, "could not remove excess " .. key
         end
+        if wanted == 0 then installed[i] = nil else u.count = wanted end
       end
     end
     for key, n in pairs(counts) do
@@ -958,7 +969,6 @@ function cell:new(cfg, logger)
 
     local job = pendingJob
     pendingJob = nil
-    cancelRequested = false
     state.job = job
     state.base = job.base or state.base
     saveState()

@@ -1,7 +1,7 @@
 -- GTNH Auto Bees installer
 -- Based on Navatusein's GTNH-OC-Installer (MIT). Installs into /home.
 --
---   wget -f https://raw.githubusercontent.com/v3rysp3d/GTNH-Auto-Bees/main/installer.lua && installer
+--   wget -f https://raw.githubusercontent.com/dronf/GTNH-Auto-Bees/main/installer.lua && installer
 --
 -- Downloads the latest release archive from GitHub; if no release exists yet
 -- it falls back to fetching the files from the main branch one by one.
@@ -10,7 +10,7 @@ local term = require("term")
 local filesystem = require("filesystem")
 local internet = require("internet")
 
-local repository = "v3rysp3d/GTNH-Auto-Bees" -- change to your fork ("owner/repo")
+local repository = "dronf/GTNH-Auto-Bees" -- change to your fork ("owner/repo")
 local archiveName = "AutoBees"
 local HOME = "/home"
 
@@ -61,9 +61,23 @@ end
 local function download(url, dest)
   local dir = filesystem.path(dest)
   if dir and dir ~= "" and not filesystem.exists(dir) then filesystem.makeDirectory(dir) end
-  if filesystem.exists(dest) then filesystem.remove(dest) end
-  shell.execute("wget -fq " .. url .. " " .. dest)
-  return fileSize(dest)
+  local temporary = dest .. ".download"
+  if filesystem.exists(temporary) then filesystem.remove(temporary) end
+  local ok = shell.execute("wget -fq " .. url .. " " .. temporary)
+  local size = fileSize(temporary)
+  if ok and size > 0 then
+    local backup = dest .. ".previous"
+    local hadFile = filesystem.exists(dest)
+    if not hadFile or (not filesystem.exists(backup) and filesystem.rename(dest, backup)) then
+      if filesystem.rename(temporary, dest) then
+        if hadFile then filesystem.remove(backup) end
+        return size
+      end
+      if hadFile then filesystem.rename(backup, dest) end
+    end
+  end
+  if filesystem.exists(temporary) then filesystem.remove(temporary) end
+  return 0
 end
 
 local function downloadTarUtility()
@@ -84,8 +98,9 @@ local function installFromRelease()
     return false, "could not download the tar utility"
   end
   shell.setWorkingDirectory(HOME)
-  shell.execute("tar -xf " .. tarPath)
+  local extracted, err = shell.execute("tar -xf " .. tarPath)
   filesystem.remove(tarPath)
+  if not extracted then return false, "archive extraction failed: " .. tostring(err) end
   if fileSize(HOME .. "/main.lua") == 0 then return false, "archive extracted nothing" end
   return true
 end
@@ -121,8 +136,13 @@ local function main()
   term.write("GTNH Auto Bees installer\n\n")
   shell.setWorkingDirectory(HOME)
 
-  local hadConfig = filesystem.exists(HOME .. "/config.lua")
-  if hadConfig then filesystem.rename(HOME .. "/config.lua", HOME .. "/config.prev.lua") end
+  local configPath = HOME .. "/config.lua"
+  local backupPath = configPath .. ".installer-backup"
+  local hadConfig = filesystem.exists(configPath)
+  if filesystem.exists(backupPath) then
+    error("Previous install left " .. backupPath .. "; restore it before retrying")
+  end
+  if hadConfig then assert(filesystem.rename(configPath, backupPath)) end
 
   term.write("Downloading the latest release archive...\n")
   local ok, why = installFromRelease()
@@ -132,17 +152,25 @@ local function main()
     term.write("No usable release archive (" .. tostring(why) .. "), fetching files from the main branch\n")
     local allOk, failed = installFromMain()
     if not allOk then
-      term.write(tostring(failed) .. " file(s) failed to download. Check the internet card and try again.\n")
+      ok = false
+      why = tostring(failed) .. " file(s) failed to download. Check the internet card and try again."
+    else
+      ok = true
     end
   end
 
   if hadConfig then
     -- keep the user's configuration, ship the fresh template next to it
-    if filesystem.exists(HOME .. "/config.lua") then filesystem.rename(HOME .. "/config.lua", HOME .. "/config.new.lua") end
-    filesystem.rename(HOME .. "/config.prev.lua", HOME .. "/config.lua")
-    term.write("Kept your config.lua; the new template is config.new.lua\n")
+    local templatePath = HOME .. "/config.new.lua"
+    if filesystem.exists(configPath) then
+      if filesystem.exists(templatePath) then filesystem.remove(templatePath) end
+      assert(filesystem.rename(configPath, templatePath))
+    end
+    assert(filesystem.rename(backupPath, configPath))
+    term.write("Kept your config.lua\n")
   end
 
+  if not ok then error(why) end
   makeAutoRun()
   term.write("\nDone. Edit config.lua if you like, then run: main\n")
   term.write("(the setup guide runs on first start; on a robot `main` starts the cell worker)\n")

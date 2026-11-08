@@ -133,12 +133,13 @@ function breeder.run(cell, job)
   ----------------------------------------------------------------------
   -- 1. environment
   ----------------------------------------------------------------------
+  if cell.cancelled and cell.cancelled() then return fail("cancelled") end
   if job.foundation then
     local ok, err = cell.setFoundation(job.foundation)
     if not ok then return fail("foundation: " .. tostring(err)) end
   end
   if job.climate then
-    local ok, err = cell.setClimate(job.climate)
+    local ok, err = cell.setClimate(job.climate, job.needTemp, job.needHum)
     if not ok then return fail("climate: " .. tostring(err)) end
   end
 
