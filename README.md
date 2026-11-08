@@ -39,6 +39,11 @@ Still untested in game, like upstream.
   the next stack; they are returned (or discarded) afterwards. Up to 8 attempts.
 - **Longer timeouts:** `startTimeout` 45 s (GT rechecks an idle machine every 600 ticks), `cycleTimeout`
   2400 s (long-lived bees without acceleration outlive 15 minutes).
+- **ME Interface slot numbering fixed for GTNH 2.8/2.9.** `setInterfaceConfiguration` takes a 1-based slot
+  (OpenComputers 1.12.68-GTNH, `InterfaceEnvironmentBase.setConfig`), not 0-based. The old default offset of -1
+  made honey and princess requests throw and every other request land one slot off, and `pair` computed its
+  correction from zero instead of from the offset in use, so it could not repair it. Default is now 0 and
+  `pair` corrects relative to the current offset.
 - `repository` lives in `version.lua` (and `installer.lua`), so a fork only has to change it there.
 
 Recommended: give the library its own ME network (or subnetwork) that holds nothing but bees this program
@@ -445,9 +450,9 @@ blocks. `pair` reports which of these is wrong:
 `diag` is the smaller version: it reports what the robot can reach above, below and in front without touching
 the ME network at all. An ME Interface reports nine slots, the apiary more, air reports none.
 
-`pair` also measures the slot numbering. ME Interface configuration slots count from zero on GTNH while every
-inventory read counts from one, so a stocked item lands one slot further along than the robot looks. The
-`interfaceSlotOffset` setting holds the difference and defaults to the GTNH value of -1.
+`pair` also measures the slot numbering. On GTNH 2.8 and 2.9, ME Interface configuration slots and inventory
+reads both count from one, so the `interfaceSlotOffset` setting defaults to 0. `pair` corrects it if a build
+differs.
 
 <a id="configuration"></a>
 

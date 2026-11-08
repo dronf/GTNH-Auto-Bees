@@ -31,12 +31,12 @@ function ae2.new(me, db)
                         slotOffset = ae2.DEFAULT_SLOT_OFFSET }, ae2)
 end
 
---- setInterfaceConfiguration numbers its slots from zero on the GTNH AE2
---- build, while every inventory read (getStackInSlot, suckFromSlot) numbers
---- them from one. Stocking "slot 1" therefore delivers into the slot the
---- robot knows as 2. Everything here speaks the robot's numbering and this
---- offset is added when talking to the interface; `pair` measures it.
-ae2.DEFAULT_SLOT_OFFSET = -1
+--- setInterfaceConfiguration takes a 1-based slot on GTNH (OpenComputers
+--- checkSlot / InterfaceEnvironmentBase.setConfig both subtract one), the
+--- same numbering as getStackInSlot and suckFromSlot, so no offset is needed.
+--- Everything here speaks the robot's numbering and this offset is added when
+--- talking to the interface; `pair` measures it in case a build differs.
+ae2.DEFAULT_SLOT_OFFSET = 0
 
 function ae2:configIndex(slot)
   return slot + (self.slotOffset or ae2.DEFAULT_SLOT_OFFSET)

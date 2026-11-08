@@ -1874,7 +1874,9 @@ function controller:new(cfg, logger)
       else
         if r.foundCount == 2 and r.foundSlot then
           P.seen[r.where] = P.cands[P.i]
-          P.offset = self.PAIR_SLOT - r.foundSlot
+          -- the marker was stocked at PAIR_SLOT with the offset in force, so
+          -- the correction is relative to that offset, not to zero
+          P.offset = (self.me.slotOffset or 0) + (self.PAIR_SLOT - r.foundSlot)
           self:log("pair: %s is the interface %s the robot (marker in slot %d)", tostring(P.cands[P.i]):sub(1, 8),
             r.where == "down" and "below" or "above", r.foundSlot)
         end

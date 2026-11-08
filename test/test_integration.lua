@@ -307,7 +307,7 @@ T.run("integration: pairing finds the swapped interfaces and saves the fix", fun
 
   ctl.cfg.cells.cell1.beeInterface = "iface-main"   -- swapped on purpose
   ctl.cfg.cells.cell1.mainInterface = "iface-bees"
-  ctl.me.slotOffset = 0                             -- and the wrong slot numbering
+  ctl.me.slotOffset = -1                            -- and the wrong slot numbering (the old default)
 
   env.side = "controller"
   local started = ctl:command("pair", "test")
@@ -328,8 +328,8 @@ T.run("integration: pairing finds the swapped interfaces and saves the fix", fun
   T.eq(ctl.cfg.cells.cell1.mainInterface, "iface-main", "main interface corrected to the one above the robot")
   local saved = util.loadTable(settingsLib.path, {})
   T.eq(((saved.controller or {}).cells or {}).cell1.beeInterface, "iface-bees", "the fix is written to settings.dat")
-  T.eq(ctl.me.slotOffset, -1, "the zero-based interface numbering was measured")
-  T.eq(util.loadTable(settingsLib.path, {}).controller.interfaceSlotOffset, -1, "and saved")
+  T.eq(ctl.me.slotOffset, 0, "the 1-based interface numbering was measured from a wrong starting offset")
+  T.eq(util.loadTable(settingsLib.path, {}).controller.interfaceSlotOffset, 0, "and saved")
   local markerIdx = ctl.PAIR_SLOT + ctl.me.slotOffset
   T.ok(env.beeIface.config[markerIdx] == nil and env.mainIface.config[markerIdx] == nil, "marker slot cleared again")
 

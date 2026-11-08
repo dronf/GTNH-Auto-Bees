@@ -164,10 +164,12 @@ function fake.install(opts)
 
   local function newInterface(address)
     local iface = networkApi({ address = address, type = "me_interface", config = {} })
-    --- Faithful to GTNH: configuration slots count from zero, so config
-    --- index 0 is the slot the robot reads as 1.
+    --- Faithful to GTNH 2.9 (OpenComputers 1.12.68-GTNH,
+    --- InterfaceEnvironmentBase.setConfig): the slot argument is 1-based,
+    --- the same numbering inventory reads use. Index 0 becomes -1 inside and
+    --- throws.
     function iface.setInterfaceConfiguration(idx, dbAddr, entry, size)
-      if idx < 0 or idx > 8 then return false end
+      if idx < 1 or idx > 9 then error("invalid slot " .. tostring(idx)) end
       if dbAddr == nil then iface.config[idx] = nil return true end
       local st = database.slots[entry]
       if not st then return false end
@@ -176,7 +178,7 @@ function fake.install(opts)
     end
     --- what the robot sees in slot `slot` (materialised from the network on demand)
     function iface.peek(slot)
-      local c = iface.config[slot - 1]
+      local c = iface.config[slot]
       if not c then return nil end
       local n = math.min(c.size, c.key and me.countKey(c.key) or me.count(c.label))
       if n == 0 then return nil end
@@ -491,7 +493,7 @@ function fake.install(opts)
       return invInsert(st, world.selected)
     elseif t == "main" or t == "bees" then
       local iface = (t == "main") and mainIface or beeIface
-      local c = iface.config[slot - 1]   -- config indices count from zero
+      local c = iface.config[slot]   -- config indices are 1-based like inventory reads
       if not c then return false end
       local n = math.min(count or c.size, c.size)
       local got = me.take(c.label, n, c.key)
