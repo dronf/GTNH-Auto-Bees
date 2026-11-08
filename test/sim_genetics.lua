@@ -84,20 +84,42 @@ end
 
 ---One offspring of princess p and drone d. `conditions(m)` decides whether
 ---mutation m can fire in the current housing.
+---
+---Mirrors Forestry's Bee.createOffspring: the mutation roll pairs the
+---PRIMARY (active) allele of one parent with the SECONDARY (inactive) allele
+---of the other, and a hit replaces only that one parent's chromosomes with
+---the mutation template. The child still takes one allele from each parent,
+---so a single hit normally yields a T/x hybrid, not a pure bee; a pure child
+---needs both rolls to hit, or a parent that already carries T.
+local function primaryOf(b) local a = activeOf(b._a, b._b) return a end
+local function secondaryOf(b) local _, i = activeOf(b._a, b._b) return i end
+
+local function mutateSide(one, two, rng, conditions)
+  local a0, a1
+  if rng() < 0.5 then a0, a1 = primaryOf(one), secondaryOf(two)
+  else a0, a1 = primaryOf(two), secondaryOf(one) end
+  for _, m in ipairs(sim.mutations) do
+    if (m.a == a0 and m.b == a1) or (m.a == a1 and m.b == a0) then
+      if (conditions == nil or conditions(m)) and rng() * 100 < m.chance then
+        return m.result
+      end
+    end
+  end
+  return nil
+end
+
 function sim.offspring(kind, p, d, rng, conditions)
-  local pa = rng() < 0.5 and p._a or p._b
-  local da = rng() < 0.5 and d._a or d._b
+  local pPair, dPair = { p._a, p._b }, { d._a, d._b }
+  local m1 = mutateSide(p, d, rng, conditions)
+  if m1 then pPair = { m1, m1 } end
+  local m2 = mutateSide(d, p, rng, conditions)
+  if m2 then dPair = { m2, m2 } end
+  local pa = rng() < 0.5 and pPair[1] or pPair[2]
+  local da = rng() < 0.5 and dPair[1] or dPair[2]
   -- One fertility allele from each parent. Drawn from a stream of its own so
   -- that adding trait genetics does not shift which species a test rolls.
   local pf = traitRoll() < 0.5 and (p._fa or sim.fertilityOf(p._a)) or (p._fb or sim.fertilityOf(p._b))
   local df = traitRoll() < 0.5 and (d._fa or sim.fertilityOf(d._a)) or (d._fb or sim.fertilityOf(d._b))
-  for _, m in ipairs(sim.mutations) do
-    if (m.a == pa and m.b == da) or (m.a == da and m.b == pa) then
-      if (conditions == nil or conditions(m)) and rng() * 100 < m.chance then
-        return sim.mkBee(kind, m.result, m.result, false, pf, df)
-      end
-    end
-  end
   return sim.mkBee(kind, pa, da, false, pf, df)
 end
 

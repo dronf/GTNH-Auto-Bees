@@ -10,7 +10,7 @@ local term = require("term")
 local filesystem = require("filesystem")
 local internet = require("internet")
 
-local repository = "v3rysp3d/GTNH-Auto-Bees"
+local repository = "v3rysp3d/GTNH-Auto-Bees" -- change to your fork ("owner/repo")
 local archiveName = "AutoBees"
 local HOME = "/home"
 

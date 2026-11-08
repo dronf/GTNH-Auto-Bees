@@ -109,14 +109,14 @@ T.run("climate", function()
   T.eq(climate.parseTolerance("BOTH_2"), { up = 2, down = 2 }, "tolerance")
   local sol = climate.solve({ baseTemp = 0.8, baseHum = 0.4, needTemp = { min = "Hot", max = "Hot" },
     queenTemp = "Normal", queenTol = { up = 2, down = 0 } })
-  T.eq({ sol.temperature, sol.heater, sol.cooler }, { "Hot", 1, 0 }, "one heater to Hot")
+  T.eq({ sol.temperature, sol.heater, sol.cooler }, { "Hot", 2, 0 }, "two heaters to Hot (0.125 each)")
   local sol2 = climate.solve({ baseTemp = 0.8, baseHum = 0.4, needTemp = { min = "Icy", max = "Icy" } })
-  T.eq({ sol2.temperature, sol2.cooler }, { "Icy", 4 }, "four coolers to Icy")
+  T.eq({ sol2.temperature, sol2.cooler }, { "Icy", 7 }, "seven coolers to Icy (0.125 each)")
   local sol3, why = climate.solve({ baseTemp = 0.8, baseHum = 0.4, needTemp = { min = "Hot", max = "Hot" },
     queenTemp = "Normal", queenTol = { up = 0, down = 0 } })
   T.ok(sol3 == nil and why ~= nil, "impossible with intolerant queen")
   local sol4 = climate.solve({ baseTemp = 0.8, baseHum = 0.4, needHum = { min = "Damp", max = "Damp" } })
-  T.eq(sol4.humidifier, 2, "two humidifiers to Damp")
+  T.eq(sol4.humidifier, 4, "four humidifiers to Damp (0.125 each)")
   local sol5 = climate.solve({ baseTemp = 0.8, baseHum = 0.4, needTemp = { min = "Hellish", max = "Hellish" } })
   T.eq(sol5.hell, true, "hell upgrade")
 

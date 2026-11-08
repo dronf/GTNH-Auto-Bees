@@ -45,19 +45,53 @@ function fake.install(opts)
     return true
   end
 
-  function me.add(stack) me.items[#me.items + 1] = stack return stack end
+  --- What AE2 treats as "the same item": an interface configured from a
+  --- database entry stocks that exact item, NBT included, so a hybrid and a
+  --- pure bee with the same label are different items to it.
+  local function stackKey(st)
+    local ind = st.individual or {}
+    return table.concat({ tostring(st.label), tostring(st._a), tostring(st._b), tostring(st._fa), tostring(st._fb),
+      tostring(ind.isAnalyzed) }, "|")
+  end
+  me.stackKey = stackKey
+
+  --- AE2 keeps one entry per distinct item and walks them in an order fixed
+  --- by the item itself, not by when it arrived: an item that leaves and
+  --- comes back is listed where it was before. Identical items merge.
+  local order, nextOrder = {}, 0
+  function me.add(stack)
+    local key = stackKey(stack)
+    if not order[key] then nextOrder = nextOrder + 1; order[key] = nextOrder end
+    for _, st in ipairs(me.items) do
+      if stackKey(st) == key and st._viaLibrary == stack._viaLibrary then
+        st.size = (st.size or 1) + (stack.size or 1)
+        return st
+      end
+    end
+    local at = #me.items + 1
+    for i, st in ipairs(me.items) do
+      if (order[stackKey(st)] or math.huge) > order[key] then at = i break end
+    end
+    table.insert(me.items, at, stack)
+    return stack
+  end
+  function me.countKey(key)
+    local n = 0
+    for _, st in ipairs(me.items) do if stackKey(st) == key then n = n + (st.size or 1) end end
+    return n
+  end
   function me.count(label)
     local n = 0
     for _, st in ipairs(me.items) do if st.label == label then n = n + (st.size or 1) end end
     return n
   end
   --- take up to `count` items matching label out of the network -> list of stacks
-  function me.take(label, count)
+  function me.take(label, count, key)
     local out = {}
     local i = 1
     while i <= #me.items and count > 0 do
       local st = me.items[i]
-      if st.label == label then
+      if (key and stackKey(st) == key) or (not key and st.label == label) then
         if (st.size or 1) <= count then
           table.remove(me.items, i)
           count = count - (st.size or 1)
@@ -137,14 +171,14 @@ function fake.install(opts)
       if dbAddr == nil then iface.config[idx] = nil return true end
       local st = database.slots[entry]
       if not st then return false end
-      iface.config[idx] = { label = st.label, size = size or 1 }
+      iface.config[idx] = { label = st.label, size = size or 1, key = stackKey(st) }
       return true
     end
     --- what the robot sees in slot `slot` (materialised from the network on demand)
     function iface.peek(slot)
       local c = iface.config[slot - 1]
       if not c then return nil end
-      local n = math.min(c.size, me.count(c.label))
+      local n = math.min(c.size, c.key and me.countKey(c.key) or me.count(c.label))
       if n == 0 then return nil end
       return { label = c.label, size = n }
     end
@@ -460,7 +494,7 @@ function fake.install(opts)
       local c = iface.config[slot - 1]   -- config indices count from zero
       if not c then return false end
       local n = math.min(count or c.size, c.size)
-      local got = me.take(c.label, n)
+      local got = me.take(c.label, n, c.key)
       if #got == 0 then return false end
       -- several distinct stacks may come out; the first goes to the selected slot
       local first = true
@@ -480,12 +514,14 @@ function fake.install(opts)
     local n = math.min(count or (st.size or 1), st.size or 1)
     if n >= (st.size or 1) then
       world.inv[world.selected] = nil
+      st._viaLibrary = (t == "bees") or nil
       me.add(st)
     else
       st.size = st.size - n
       local piece = {}
       for k, v in pairs(st) do piece[k] = v end
       piece.size = n
+      piece._viaLibrary = (t == "bees") or nil
       me.add(piece)
     end
     return true

@@ -305,7 +305,13 @@ function breeder.run(cell, job)
         state.archiveFailures = (state.archiveFailures or 0) + 1
       end
     end)
-    trimToSpare(groups.hybrid, 0, function(e, n) cell.discard(e.slot, n) end)
+    -- Drones that carry the target on one allele are the only way to purify
+    -- a line short of a lucky double mutation: in Forestry a single hit
+    -- replaces one parent's genome, so offspring of a hit are T/x hybrids.
+    -- Keep the best few as mates; once pure target drones exist they outrank
+    -- these in bestMate and the surplus goes.
+    local carrierSpare = (#groups.target > 0) and 0 or SPARE_MATES
+    trimToSpare(groups.hybrid, carrierSpare, function(e, n) cell.discard(e.slot, n) end)
     local done = {}
     for _, sp in ipairs({ A, B }) do
       if not done[sp] then
@@ -361,8 +367,12 @@ function breeder.run(cell, job)
       wanted = { target, A, B }
     elseif princessHasTarget or haveTargetDrone then
       setPhase("purify")
-      -- best: a target carrier; otherwise any parent drone keeps the line going
-      wanted = { target, A, B }
+      -- best: a target carrier. Without one, mate her with the parent she
+      -- lacks: that pairing can fire the mutation again, while mating with a
+      -- parent she already carries only dilutes the target.
+      if hasA and not hasB then wanted = { target, B, A }
+      elseif hasB and not hasA then wanted = { target, A, B }
+      else wanted = { target, A, B } end
     elseif hasA or hasB then
       -- Forestry rolls the mutation from one allele of each parent, so a
       -- hybrid A/B princess is fine: mate her with the parent she lacks.
@@ -404,7 +414,10 @@ function breeder.run(cell, job)
         newPrincessSlot = e.slot
       elseif kind == "drone" and not before[e.slot] then
         local sp = genome.displaySpecies(st)
-        local interesting = (state.phase ~= "mutate") or (sp ~= nameOf(A) and sp ~= nameOf(B))
+        -- A drone showing a parent's name can still carry the target as its
+        -- inactive allele, so every offspring is read unless the job asks
+        -- to save honey.
+        local interesting = (not job.saveHoney) or (state.phase ~= "mutate") or (sp ~= nameOf(A) and sp ~= nameOf(B))
         if interesting then st = analyzeSlot(e.slot) or st end
         if genome.analyzed(st) and genome.hasSpecies(st, target) then hitsThisGen = hitsThisGen + 1 end
         droneSummaries[#droneSummaries + 1] = summarize(st)

@@ -15,6 +15,36 @@ lands in your ME network. Watch it on a screen or from Discord.
 > was taken from the GTNH source, and the breeding logic is covered by a simulator, but expect to confirm
 > a few things in game first. See [Status](#status).
 
+## Changes in this fork
+
+Fixes made after reading the code against the GTNH sources (OpenComputers, GT5-Unofficial, ForestryMC).
+Still untested in game, like upstream.
+
+- **Purification works with real Forestry genetics.** In Forestry a mutation replaces only one parent's
+  genome, so a hit gives a T/x hybrid, not a pure bee. The breeder used to throw away every drone that
+  carried the target on one allele, which left a hybrid princess nothing to purify against except a rare
+  double mutation. It now keeps the best few target carriers as mates until pure target drones exist, and
+  when no carrier is available it mates the princess with the parent she lacks (which can fire the mutation
+  again) instead of the one she already carries. The test simulator modelled mutations as producing pure
+  bees; it now follows `Bee.createOffspring` (primary allele of one parent paired with the secondary of
+  the other, one parent replaced by the template).
+- **Every offspring is analyzed.** A drone showing a parent's name can carry the target as its inactive
+  allele. Set `saveHoney = true` on a job to restore the old skip.
+- **Climate upgrades are counted correctly.** GT's heater, cooler, humidifier and dryer each move the value
+  by 0.125 (`GTApiaryUpgrade`), not 0.25, so the old code installed half of what a climate needed.
+- **Hybrids are no longer dropped on the ground by default** (`keepJunk = true`). A fetch by label can pull
+  any stack with that name, including bees you stored yourself.
+- **Fetches no longer get stuck on the same wrong stack.** The ME network always hands over the first
+  matching stack. Rejected stacks are now held in the robot until the fetch is over, so each retry reaches
+  the next stack; they are returned (or discarded) afterwards. Up to 8 attempts.
+- **Longer timeouts:** `startTimeout` 45 s (GT rechecks an idle machine every 600 ticks), `cycleTimeout`
+  2400 s (long-lived bees without acceleration outlive 15 minutes).
+- `repository` lives in `version.lua` (and `installer.lua`), so a fork only has to change it there.
+
+Recommended: give the library its own ME network (or subnetwork) that holds nothing but bees this program
+bred. Labels are the only handle the ME API offers, so a shared network makes fetches slower and less
+predictable.
+
 ## Content
 
 - [Information](#information)
@@ -214,10 +244,10 @@ Shared by every cell through the ME network, installed per job:
 
 | Item | Count | Notes |
 |---|---|---|
-| Heater upgrade | 16 | +0.25 temperature each |
-| Cooler upgrade | 16 | |
-| Humidifier upgrade | 16 | |
-| Dryer upgrade | 16 | |
+| Heater upgrade | 16 | +0.125 temperature each (GTApiaryUpgrade) |
+| Cooler upgrade | 16 | -0.125 temperature each |
+| Humidifier upgrade | 16 | +0.125 humidity each |
+| Dryer upgrade | 16 | -0.125 humidity each |
 | Hell emulation upgrade | 1 | Hellish temperature without a Nether station |
 | Desert / Plains / Jungle / Winter / Ocean emulation | 1 each | only for biome-type conditions |
 

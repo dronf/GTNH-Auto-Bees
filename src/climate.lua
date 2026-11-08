@@ -4,13 +4,13 @@
 --   > 1.00 Hot, > 0.85 Warm, > 0.35 Normal, > 0.00 Cold, else Icy
 --   Hellish only for Nether-type biomes (the Hell emulation upgrade)
 -- and humidity as:  > 0.85 Damp, > 0.30 Normal, else Arid
--- GTNH Industrial Apiary upgrades move the value by 0.25 per heater/cooler/
+-- GTNH Industrial Apiary upgrades move the value by 0.125 per heater/cooler/
 -- humidifier/dryer, up to 16 of each.
 local climate = {}
 
 climate.temperatures = { "Icy", "Cold", "Normal", "Warm", "Hot", "Hellish" }
 climate.humidities = { "Arid", "Normal", "Damp" }
-climate.step = 0.25
+climate.step = 0.125  -- GTApiaryUpgrade: heater/cooler/humidifier/dryer each move 0.125f
 climate.maxUpgrades = 16
 
 -- Biome temperature and humidity, for saying where a cell stands

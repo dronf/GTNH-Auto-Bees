@@ -31,6 +31,14 @@ local function drones(species, n)
 end
 me.add(sim.mkBee("princess", "Forest", "Forest", true))
 me.add(drones("Forest", 48))
+-- A hybrid that shows the same label ("Meadows Drone") sits in front of the
+-- pure stack. The ME network hands over the first match, so the cell has to
+-- hold this one aside and ask again rather than get it back every time.
+do
+  local hybrid = sim.mkBee("drone", "Meadows", "Forest", true)
+  hybrid.size = 8
+  me.add(hybrid)
+end
 me.add(drones("Meadows", 48))
 me.add({ name = "Forestry:honeyDrop", label = "Honey Drop", size = 200 })
 me.add({ name = "gregtech:apiaryUpgrade", label = "Industrial Apiary Heater Upgrade", size = 16 })
@@ -57,7 +65,7 @@ env.side = "robot"
 local cellLib = require("src.cell")
 local cell = cellLib:new({
   name = "cell1", port = 7311, housing = "gt_iapiary", quiet = true,
-  slots = { honey = 1, scratch = 2, firstWork = 3 }, honeyMin = 8, honeyFetch = 32,
+  slots = { honey = 1, scratch = 2, firstWork = 3 }, honeyMin = 8, honeyFetch = 32, keepJunk = true,
   startTimeout = 20, cycleTimeout = 900, requestTimeout = 90,
   interface = { main = { honey = 1, supply = 2, dump = 9 }, bees = { princess = 1, drone = 2, archive = 9 } },
   upgradeKeys = { heater = "heater", cooler = "cooler", humidifier = "humidif", dryer = "dryer", hell = "hell",
@@ -104,13 +112,20 @@ T.run("integration: breed Cultivated through Common with foundation + heater", f
   T.ok(util.contains(env.me.craftRequests, "Block of Copper"), "foundation block was autocrafted")
   local heaters = 0
   for _, u in pairs(env.world.housing.upgrades) do if u.label:find("Heater") then heaters = heaters + u.size end end
-  T.eq(heaters, 1, "one heater upgrade installed")
+  T.eq(heaters, 2, "two heater upgrades installed (0.125 each, plains to Hot)")
   T.ok((env.honeyUsed or 0) > 0, "honey was spent on analysis: " .. tostring(env.honeyUsed))
 
-  -- only pure bees ever reached the ME network
+  -- only pure bees were ever archived through the bee-library interface
+  -- (hybrids go back through the main interface dump with keepJunk)
   for _, st in ipairs(env.me.items) do
-    if genome.isBee(st) then T.ok(genome.analyzed(st) and genome.isPureAny(st), "library holds only analyzed pure bees: " .. genome.describe(st)) end
+    if genome.isBee(st) and st._viaLibrary then T.ok(genome.analyzed(st) and genome.isPureAny(st), "library holds only analyzed pure bees: " .. genome.describe(st)) end
   end
+  -- the hybrid that shadowed the pure Meadows stack was handed back, not lost
+  local hybridBack = 0
+  for _, st in ipairs(env.me.items) do
+    if genome.isBee(st) and st._a == "Meadows" and st._b == "Forest" and genome.kind(st) == "drone" then hybridBack = hybridBack + (st.size or 1) end
+  end
+  T.ok(hybridBack >= 8, "hybrid drones returned to the ME network, not dropped: " .. hybridBack)
   -- the housing was left empty and the robot parked
   T.ok(env.world.housing.queen == nil and env.world.housing.drone == nil, "housing emptied after the job")
   T.eq(env.world.level, 0, "robot parked at level 0")

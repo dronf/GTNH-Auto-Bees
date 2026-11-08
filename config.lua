@@ -118,16 +118,18 @@ local config = {
     housing = "gt_iapiary",
 
     slots = { honey = 1, scratch = 2, firstWork = 3 },   -- robot inventory layout
-    -- Hybrids are dropped, because one carries the same label as a pure bee
-    -- and the network would hand it back on the next fetch. Set this true to
-    -- keep them in the ME network instead and sort them out yourself.
-    keepJunk = false,
+    -- Hybrids go back into the ME network (via the main interface dump slot)
+    -- rather than being dropped on the ground to despawn. Dropping them can
+    -- destroy bees you put in the network yourself, since a fetch by label can
+    -- pull any stack with that name. Set false only on a network that holds
+    -- nothing but this program's own library.
+    keepJunk = true,
     honeyMin = 8,
     honeyFetch = 32,
 
-    startTimeout = 20,               -- seconds to wait for the machine to take the bees
+    startTimeout = 45,               -- seconds to wait for the machine to take the bees (GT rechecks idle machines every 600 ticks)
     startGrace = 90,                 -- extra seconds before calling a cycle dead when no bee was ever seen
-    cycleTimeout = 900,              -- seconds a queen may work before the cell is called stuck
+    cycleTimeout = 2400,             -- seconds a queen may work before the cell is called stuck (long-lived bees without acceleration run >15 min)
     requestTimeout = 90,             -- seconds to wait for the controller to stock an interface
 
     interface = {                    -- ME interface slot usage (must match the controller)

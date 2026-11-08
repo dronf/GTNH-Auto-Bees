@@ -16,7 +16,7 @@ local settingsLib = require("src.settings")
 local config = require("config")
 local version = require("version")
 
-local repository = "v3rysp3d/GTNH-Auto-Bees"
+local repository = version.repository or "v3rysp3d/GTNH-Auto-Bees"
 local archiveName = "AutoBees"
 
 local args = { ... }
